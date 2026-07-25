@@ -27,8 +27,14 @@ const STATISTICS_PATH = "/publisher/report/statistics";
 const SOURCES_PATH = "/publisher/sources";
 /** Geen gedocumenteerd maximum; hetzelfde ruime blok als voorheen. */
 const MAX_DAYS_PER_CALL = 92;
-const PAGE_SIZE = 500;
-const MAX_PAGES = 20;
+/**
+ * Harde grens van de API: een grotere `limit` levert
+ * `{"code":2031,"message":"Limit should be between 1 to 100"}`. De blueprint
+ * noemt alleen het voorbeeld 20 en zwijgt over het maximum.
+ */
+export const PAGE_SIZE = 100;
+/** 100 × 100 regels per blok per bron; genoeg, en het loopt niet eindeloos. */
+const MAX_PAGES = 100;
 
 /** Eén transactieregel, zoals de blueprint hem beschrijft. */
 interface TdTransaction {
@@ -247,23 +253,31 @@ async function fetchDailyStats(
   try {
     for (const chunk of chunkRange(ctx.range.from, ctx.range.to, MAX_DAYS_PER_CALL)) {
       for (const sourceId of sources(ctx.settings)) {
-        const params = new URLSearchParams({
-          intervalType: "day",
-          reportType: "date",
-          fromDate: toCompactDate(chunk.from),
-          toDate: toCompactDate(chunk.to),
-          reportCurrencyCode: currency(ctx.settings),
-          offset: "0",
-          limit: String(PAGE_SIZE),
-        });
-        if (sourceId) params.set("sourceId", sourceId);
+        // Een blok van 92 dagen past net binnen één pagina van 100, maar dat is
+        // te krap om op te vertrouwen: gewoon doorbladeren tot het op is.
+        const items: Record<string, unknown>[] = [];
+        for (let page = 0; page < MAX_PAGES; page += 1) {
+          const params = new URLSearchParams({
+            intervalType: "day",
+            reportType: "date",
+            fromDate: toCompactDate(chunk.from),
+            toDate: toCompactDate(chunk.to),
+            reportCurrencyCode: currency(ctx.settings),
+            offset: String(page * PAGE_SIZE),
+            limit: String(PAGE_SIZE),
+          });
+          if (sourceId) params.set("sourceId", sourceId);
 
-        const result = await requestJson<TdPage<Record<string, unknown>>>(
-          `${base(ctx.settings)}${STATISTICS_PATH}?${params}`,
-          { headers: authHeaders(token), label: "TradeDoubler statistieken", timeoutMs: 60_000 },
-        );
+          const result = await requestJson<TdPage<Record<string, unknown>>>(
+            `${base(ctx.settings)}${STATISTICS_PATH}?${params}`,
+            { headers: authHeaders(token), label: "TradeDoubler statistieken", timeoutMs: 60_000 },
+          );
+          const batch = Array.isArray(result?.items) ? result.items : [];
+          items.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+        }
 
-        for (const item of result?.items ?? []) {
+        for (const item of items) {
           const date = parseDate(pick(item, "date"));
           if (!date) continue;
           const day = date.toISOString().slice(0, 10);

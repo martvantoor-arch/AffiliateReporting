@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { parseCsv, parseCsvObjects } from "../lib/csv";
 import { normaliseCurrency, normaliseStatus, parseAmount, parseDate } from "../lib/networks/types";
-import { mapStatus, toCompactDate } from "../lib/networks/tradedoubler";
+import { PAGE_SIZE, mapStatus, toCompactDate } from "../lib/networks/tradedoubler";
 
 test("parseAmount begrijpt Nederlandse en Engelse notatie", () => {
   assert.equal(parseAmount("12,45"), 12.45);
@@ -112,4 +112,9 @@ test("TradeDoubler-status is één letter: A, P of D", () => {
   // Kleine letters en onbekende waarden mogen niet als "goedgekeurd" eindigen.
   assert.equal(mapStatus({ status: "d" }), "rejected");
   assert.equal(mapStatus({ status: undefined }), "pending");
+});
+
+test("TradeDoubler accepteert hoogstens 100 regels per pagina", () => {
+  // Groter geeft {"code":2031,"message":"Limit should be between 1 to 100"}.
+  assert.ok(PAGE_SIZE >= 1 && PAGE_SIZE <= 100);
 });
