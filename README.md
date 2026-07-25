@@ -94,16 +94,17 @@ terug, die je dan kunt invullen.
 | **Awin** | Publisher-id + OAuth2-token | Awin-dashboard → Gereedschap → API-credentials |
 | **Daisycon** | E-mail + wachtwoord, óf client-id + secret + refresh-token | [developers.daisycon.com](https://developers.daisycon.com/) |
 | **TradeTracker** | Customer-id + webservice-passphrase | TradeTracker → Account → Webservice (eerst aanzetten) |
-| **TradeDoubler** | Affiliate-id + report-token | TradeDoubler → Rapporten → Open rapport-API |
+| **TradeDoubler** | Client-id + secret, plus je eigen inloggegevens | TradeDoubler → Tools → API Info |
 | **bol.com** | Client-id + client-secret | bol.com partneraccount |
 
 ### Eerlijk over de betrouwbaarheid per koppeling
 
 De adapters zijn gebouwd op de gepubliceerde documentatie van elk netwerk.
-**Awin** en **bol.com** zijn tegen hun officiële specificatie nagelopen — bij
-bol.com is dat de OpenAPI-specificatie van de Affiliate Reporting API V2, dus
-endpoints en veldnamen komen letterlijk daaruit. De andere drie staan als
-**"nog te verifiëren"** in de app, met een waarschuwing erbij.
+**Awin**, **bol.com** en **TradeDoubler** zijn tegen hun officiële specificatie
+nagelopen: bij bol.com de OpenAPI-specificatie van de Affiliate Reporting API
+V2, bij TradeDoubler de API-blueprint van de Publisher Management API. Endpoints
+en veldnamen komen daar letterlijk uit. **Daisycon** en **TradeTracker** staan
+als **"nog te verifiëren"** in de app, met een waarschuwing erbij.
 
 Wat dat praktisch betekent:
 
@@ -113,8 +114,8 @@ Wat dat praktisch betekent:
   velden met meerdere mogelijke namen en negeert schrijfwijze en scheidingstekens,
   dus veel varianten vangt hij al op.
 - Endpoints, rapportnamen en paden zijn **in de UI aan te passen** zonder de code
-  aan te raken. Bij TradeDoubler kun je bijvoorbeeld de rapportnaam wijzigen, bij
-  bol.com het rapport-pad en de basis-URL.
+  aan te raken. Bij bol.com kun je bijvoorbeeld het rapport-pad wijzigen; elk
+  netwerk heeft een veld voor de basis-URL.
 - Mislukt een sync, dan blijft dat netjes bij dat ene netwerk: de andere
   netwerken worden gewoon bijgewerkt en de foutmelding van het netwerk komt
   letterlijk in de app te staan.
@@ -135,12 +136,23 @@ standaard: dan staat een transactie op de dag dat de bezoeker klikte, wat past
 bij de grafieken. Wil je vooral latere goedkeuringen oppikken, kies dan
 'laatst gewijzigd'.
 
-**Clicks en impressies staan standaard uit** bij Awin, Daisycon en bol.com. Dat
-is geen gemakzucht: die drie rapportages geven een *totaal over een periode*,
-geen reeks per dag. Voor dagcijfers is dus één aanroep per dag nodig. Zet je het
-aan, dan haalt de app hoogstens de laatste 7 dagen op; bij Awin heb je ook een
-regio nodig (bijvoorbeeld `NL`). Je commissies en grafieken werken zonder dit
-gewoon — clicks zijn de enige kolom die je mist.
+**TradeDoubler vraagt vier gegevens.** Een client-id en client-secret (Tools →
+API Info) *plus* je gewone gebruikersnaam en wachtwoord: de client tekent het
+verzoek, je inloggegevens bepalen tot welk account het token toegang geeft. Het
+secret krijg je maar één keer te zien — kwijt betekent client verwijderen en
+opnieuw aanmaken. Twee dingen die niet meer werken en die je in oudere
+voorbeelden nog tegenkomt: `reports.tradedoubler.com` bestaat niet meer (dat
+geeft geen HTTP-fout maar een mislukte verbinding) en `/pan/aReport3Key.action`
+geeft 404. Alles loopt nu via `connect.tradedoubler.com`.
+
+**Clicks en impressies staan standaard uit** bij Awin, Daisycon en bol.com — bij
+TradeDoubler juist aan, want dat is het enige netwerk dat een reeks per dag in
+één aanroep geeft. Bij de andere drie is het geen gemakzucht: die rapportages
+geven een *totaal over een periode*, geen reeks per dag. Voor dagcijfers is daar
+dus één aanroep per dag nodig. Zet je het aan, dan haalt de app hoogstens de
+laatste 7 dagen op; bij Awin heb je ook een regio nodig (bijvoorbeeld `NL`). Je
+commissies en grafieken werken zonder dit gewoon — clicks zijn de enige kolom
+die je mist.
 
 **bol.com.** De koppeling praat met de Affiliate Reporting API V2 op
 `api.bol.com/marketing/affiliate/reports/v2`: `/order-report` voor je

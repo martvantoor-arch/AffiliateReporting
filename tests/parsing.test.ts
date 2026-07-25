@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { parseCsv, parseCsvObjects } from "../lib/csv";
 import { normaliseCurrency, normaliseStatus, parseAmount, parseDate } from "../lib/networks/types";
-import { flattenReportRows } from "../lib/networks/tradedoubler";
+import { mapStatus, toCompactDate } from "../lib/networks/tradedoubler";
 
 test("parseAmount begrijpt Nederlandse en Engelse notatie", () => {
   assert.equal(parseAmount("12,45"), 12.45);
@@ -99,24 +99,17 @@ test("parseCsv verwerkt een regeleinde binnen een veld", () => {
   assert.equal(rows[1][1], "7");
 });
 
-test("flattenReportRows begrijpt de rapportvormen van TradeDoubler", () => {
-  // Platte array.
-  assert.deepEqual(flattenReportRows([{ a: 1 }]), [{ a: 1 }]);
+test("TradeDoubler krijgt datums als 20190101, niet als 2019-01-01", () => {
+  // Het verkeerde datumformaat kostte bij Daisycon een ronde; hier vastgelegd.
+  assert.equal(toCompactDate(new Date("2019-01-01T00:00:00Z")), "20190101");
+  assert.equal(toCompactDate(new Date("2026-07-25T22:30:00Z")), "20260725");
+});
 
-  // Matrix met losse kolomnamen.
-  const matrix = flattenReportRows({
-    columnNames: ["transactionId", "commission"],
-    matrix: [{ columns: [{ value: "T1" }, { value: "3,50" }] }],
-  });
-  assert.deepEqual(matrix, [{ transactionId: "T1", commission: "3,50" }]);
-
-  // Rijen als losse arrays.
-  const arrays = flattenReportRows({
-    header: ["id", "bedrag"],
-    rows: [["X1", "10"]],
-  });
-  assert.deepEqual(arrays, [{ id: "X1", bedrag: "10" }]);
-
-  assert.deepEqual(flattenReportRows({}), []);
-  assert.deepEqual(flattenReportRows(null), []);
+test("TradeDoubler-status is één letter: A, P of D", () => {
+  assert.equal(mapStatus({ status: "A" }), "approved");
+  assert.equal(mapStatus({ status: "P" }), "pending");
+  assert.equal(mapStatus({ status: "D" }), "rejected");
+  // Kleine letters en onbekende waarden mogen niet als "goedgekeurd" eindigen.
+  assert.equal(mapStatus({ status: "d" }), "rejected");
+  assert.equal(mapStatus({ status: undefined }), "pending");
 });
