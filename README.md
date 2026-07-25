@@ -99,11 +99,11 @@ terug, die je dan kunt invullen.
 
 ### Eerlijk over de betrouwbaarheid per koppeling
 
-De adapters zijn gebouwd op de gepubliceerde documentatie van elk netwerk, maar
-ik heb geen live accounts om ze tegen te testen. Alleen **Awin** heeft een
-stabiele, goed gedocumenteerde REST-API waar ik van de veldnamen uitga; die is
-gemarkeerd als nagelopen. De andere vier staan als **"nog te verifiëren"** in de
-app, met een waarschuwing erbij.
+De adapters zijn gebouwd op de gepubliceerde documentatie van elk netwerk.
+**Awin** en **bol.com** zijn tegen hun officiële specificatie nagelopen — bij
+bol.com is dat de OpenAPI-specificatie van de Affiliate Reporting API V2, dus
+endpoints en veldnamen komen letterlijk daaruit. De andere drie staan als
+**"nog te verifiëren"** in de app, met een waarschuwing erbij.
 
 Wat dat praktisch betekent:
 
@@ -114,7 +114,7 @@ Wat dat praktisch betekent:
   dus veel varianten vangt hij al op.
 - Endpoints, rapportnamen en paden zijn **in de UI aan te passen** zonder de code
   aan te raken. Bij TradeDoubler kun je bijvoorbeeld de rapportnaam wijzigen, bij
-  bol.com het rapport-pad en de accept-header.
+  bol.com het rapport-pad en de basis-URL.
 - Mislukt een sync, dan blijft dat netjes bij dat ene netwerk: de andere
   netwerken worden gewoon bijgewerkt en de foutmelding van het netwerk komt
   letterlijk in de app te staan.
@@ -135,25 +135,29 @@ standaard: dan staat een transactie op de dag dat de bezoeker klikte, wat past
 bij de grafieken. Wil je vooral latere goedkeuringen oppikken, kies dan
 'laatst gewijzigd'.
 
-**Clicks en impressies staan standaard uit** bij Awin en Daisycon, en **bol.com
-staat op CSV-import**. Dat is geen gemakzucht: bij Awin bestaat er geen
-dagreeks (zie hieronder), bij Daisycon is het statistiekenpad niet publiek
-vastgelegd en gaf het een 404, en bij bol.com geeft het rapport-pad met een
-geldig token HTTP 403. Liever geen rode fout bij elke sync dan de schijn dat er
-iets kapot is; je commissies en grafieken werken in alle drie de gevallen
-gewoon. Elk van de drie kun je aanzetten bij het account als je het juiste pad
-kent.
+**Clicks en impressies staan standaard uit** bij Awin, Daisycon en bol.com. Dat
+is geen gemakzucht: die drie rapportages geven een *totaal over een periode*,
+geen reeks per dag. Voor dagcijfers is dus één aanroep per dag nodig. Zet je het
+aan, dan haalt de app hoogstens de laatste 7 dagen op; bij Awin heb je ook een
+regio nodig (bijvoorbeeld `NL`). Je commissies en grafieken werken zonder dit
+gewoon — clicks zijn de enige kolom die je mist.
 
-*Waarom Awin geen dagreeks heeft:* zijn rapportages geven een totaal over een
-periode. Voor dagcijfers is dus één aanroep per dag nodig. Zet je het aan, dan
-haalt de app hoogstens de laatste 7 dagen op en heb je ook een regio nodig
-(bijvoorbeeld `NL`).
+**bol.com.** De koppeling praat met de Affiliate Reporting API V2 op
+`api.bol.com/marketing/affiliate/reports/v2`: `/order-report` voor je
+commissies, `/promotion-report` voor clicks en impressies. Twee dingen om te
+weten:
 
-**bol.com verdient een aparte waarschuwing.** Het partnerprogramma wijzigt zijn
-rapportage-endpoint met enige regelmaat en er is geen stabiele publieke
-documentatie voor de affiliate-kant. De OAuth2-tokenwissel (`login.bol.com`) is
-het deel waar ik zeker van ben; het rapport-pad is een aanname. Werkt het niet,
-gebruik dan de CSV-import — voor bol.com is dat de betrouwbaarste route.
+- Het pad `/partner/...` uit oudere voorbeelden bestaat niet meer; dat geeft met
+  een geldig token HTTP 403.
+- Krijg je 403 op het orderrapport terwijl inloggen wél lukt, dan is je
+  API-toegang nog niet vrijgegeven voor het partnerprogramma. Dat vraag je aan
+  bij bol (Handleiding toegang API); de verbindingstest zegt dit ook met zoveel
+  woorden.
+
+Bij bol.com groepeert het overzicht op **producttitel** in plaats van
+programmanaam — bij één winkel is dat de informatievere indeling: je ziet welke
+artikelen je geld opleveren. Heb je meerdere sites, dan kun je met *Alleen deze
+sites* op sitecode of sitenaam filteren.
 
 ### CSV-import
 

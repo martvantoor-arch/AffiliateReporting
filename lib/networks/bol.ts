@@ -1,27 +1,63 @@
-import { parseCsvObjects } from "@/lib/csv";
-import { AdapterError, chunkRange, pick, request, toIsoDate, truncate } from "@/lib/networks/http";
-import { flattenReportRows } from "@/lib/networks/tradedoubler";
+import { addDays } from "@/lib/dates";
+import { AdapterError, chunkRange, pick, requestJson, toIsoDate } from "@/lib/networks/http";
 import {
-  normaliseCurrency,
   normaliseStatus,
   parseAmount,
   parseDate,
   type AdapterContext,
   type FetchResult,
   type NetworkAdapter,
+  type NormalisedDailyStat,
   type NormalisedTransaction,
   type TestResult,
+  type TransactionStatus,
 } from "@/lib/networks/types";
 
+/**
+ * bol Affiliate Reporting API V2.
+ *
+ * Endpoints en veldnamen komen uit de officiële OpenAPI-specificatie van bol
+ * (api.bol.com/marketing/docs/affiliate-reports-api). Let op het pad: de
+ * rapportage voor partners zit onder /marketing/affiliate/reports/v2, niet
+ * onder /partner — dat laatste geeft met een geldig token een 403.
+ */
 const DEFAULT_TOKEN_URL = "https://login.bol.com/token";
-const DEFAULT_BASE = "https://api.bol.com";
-const DEFAULT_PATH = "/partner/transactions";
-const DEFAULT_ACCEPT = "application/json";
+const DEFAULT_BASE = "https://api.bol.com/marketing/affiliate/reports/v2";
+const ORDER_REPORT = "/order-report";
+const PROMOTION_REPORT = "/promotion-report";
+/** Rustig aan met de periodelengte; de API documenteert geen maximum. */
 const MAX_DAYS_PER_CALL = 31;
+/** Zie fetchDailyStats: het promotierapport kent geen datum-as. */
+const CLICK_DAYS = 7;
+
+/** Eén regel uit het orderrapport, zoals de specificatie hem beschrijft. */
+interface BolOrderItem {
+  orderDateTime?: string;
+  orderDate?: string;
+  orderId?: string;
+  orderItemId?: string;
+  productTitle?: string;
+  productId?: string;
+  quantity?: number;
+  siteName?: string;
+  siteCode?: string;
+  subId?: string;
+  priceExclVat?: number;
+  priceInclVat?: number;
+  commissionPercentage?: number;
+  commission?: number;
+  status?: string;
+  statusFinal?: boolean;
+  approvedForPayment?: boolean;
+}
+
+function base(settings: Record<string, string>): string {
+  return (settings.baseUrl || DEFAULT_BASE).replace(/\/+$/, "");
+}
 
 /**
- * bol.com gebruikt OAuth2 client-credentials, net als hun Retailer API: je
- * wisselt client-id en secret in voor een token dat een uur geldig is.
+ * bol gebruikt OAuth2 client-credentials: client-id en secret worden ingewisseld
+ * voor een bearer-token dat een uur geldig is.
  */
 async function accessToken(
   credentials: Record<string, string>,
@@ -34,152 +70,214 @@ async function accessToken(
   }
   const basic = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
   const url = `${settings.tokenUrl || DEFAULT_TOKEN_URL}?grant_type=client_credentials`;
-  const response = await request(url, {
+  const payload = await requestJson<{ access_token?: string }>(url, {
     method: "POST",
     headers: {
       authorization: `Basic ${basic}`,
       "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
     },
     label: "bol.com login",
   });
-  const payload = (await response.json()) as { access_token?: string };
   if (!payload.access_token) {
     throw new AdapterError("bol.com gaf geen access-token terug.");
   }
   return payload.access_token;
 }
 
-async function loadRows(
-  ctx: Omit<AdapterContext, "range">,
-  chunk: { from: Date; to: Date },
-): Promise<Record<string, unknown>[]> {
-  const token = await accessToken(ctx.credentials, ctx.settings);
-  const base = (ctx.settings.baseUrl || DEFAULT_BASE).replace(/\/+$/, "");
-  const path = ctx.settings.reportPath || DEFAULT_PATH;
+function reportHeaders(token: string): HeadersInit {
+  return { authorization: `Bearer ${token}`, accept: "application/json" };
+}
+
+/** De rapporten leveren `{ items: [...] }`. */
+async function loadReport<T>(
+  settings: Record<string, string>,
+  token: string,
+  path: string,
+  from: Date,
+  to: Date,
+  label: string,
+): Promise<T[]> {
   const params = new URLSearchParams({
-    "start-date": toIsoDate(chunk.from),
-    "end-date": toIsoDate(chunk.to),
+    startDate: toIsoDate(from),
+    endDate: toIsoDate(to),
   });
-  if (ctx.settings.siteId?.trim()) params.set("site-id", ctx.settings.siteId.trim());
-
-  const url = `${base}${path.startsWith("/") ? path : `/${path}`}?${params}`;
-  const response = await request(url, {
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: ctx.settings.acceptHeader || DEFAULT_ACCEPT,
-    },
-    label: "bol.com",
-    timeoutMs: 60_000,
-  });
-
-  const text = await response.text();
-  if (!text.trim()) return [];
-  const trimmed = text.trimStart();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return parseCsvObjects(text) as unknown as Record<string, unknown>[];
-  }
-  try {
-    return flattenReportRows(JSON.parse(text));
-  } catch {
-    throw new AdapterError(
-      `bol.com gaf een onleesbaar antwoord: ${truncate(text, 200)}`,
-    );
-  }
+  const payload = await requestJson<{ items?: T[] }>(
+    `${base(settings)}${path}?${params}`,
+    { headers: reportHeaders(token), label, timeoutMs: 60_000 },
+  );
+  return Array.isArray(payload?.items) ? payload.items : [];
 }
 
 async function fetchTransactions(ctx: AdapterContext): Promise<FetchResult> {
-  // Standaard staat de API-route uit. bol.com heeft geen stabiel gedocumenteerd
-  // rapportage-endpoint voor partners; met een geldig token gaf het pad HTTP
-  // 403 "Unauthorized request". Dan is een rode fout bij elke sync alleen ruis,
-  // terwijl de CSV-import wel werkt.
-  if (ctx.settings.useApi !== "ja") {
-    return {
-      transactions: [],
-      dailyStats: [],
-      warnings: [
-        "bol.com staat op CSV-import. Exporteer je transacties bij bol.com en upload ze onderaan deze pagina. Wil je toch de API proberen, zet dat dan aan bij dit account.",
-      ],
-    };
-  }
-
+  const token = await accessToken(ctx.credentials, ctx.settings);
   const transactions: NormalisedTransaction[] = [];
   const warnings: string[] = [];
 
   for (const chunk of chunkRange(ctx.range.from, ctx.range.to, MAX_DAYS_PER_CALL)) {
-    const rows = await loadRows(ctx, chunk);
-    for (const row of rows) {
-      const mapped = mapTransaction(row);
+    const items = await loadReport<BolOrderItem>(
+      ctx.settings,
+      token,
+      ctx.settings.reportPath || ORDER_REPORT,
+      chunk.from,
+      chunk.to,
+      "bol.com orderrapport",
+    );
+    for (const item of items) {
+      const mapped = mapOrderItem(item, ctx.settings);
       if (mapped) transactions.push(mapped);
     }
   }
 
-  if (transactions.length === 0) {
-    warnings.push(
-      "bol.com leverde geen regels op. Het partnerprogramma wisselt zijn API-pad wel eens; controleer het pad bij de instellingen of gebruik de CSV-import.",
-    );
-  }
-  return { transactions, dailyStats: [], warnings };
+  return {
+    transactions,
+    dailyStats: await fetchDailyStats(ctx, token, warnings),
+    warnings,
+  };
 }
 
-function mapTransaction(row: Record<string, unknown>): NormalisedTransaction | null {
+function mapOrderItem(
+  item: BolOrderItem,
+  settings: Record<string, string>,
+): NormalisedTransaction | null {
+  const row = item as unknown as Record<string, unknown>;
+
+  // orderItemId is de fijnste eenheid: één order kan meerdere producten hebben.
   const externalId = String(
-    pick(row, "transactionId", "id", "orderId", "orderNumber", "referenceId") ?? "",
+    pick(row, "orderItemId", "orderId") ?? "",
   ).trim();
-  const occurredAt = parseDate(
-    pick(row, "transactionDate", "orderDate", "date", "clickDate", "datum"),
-  );
+  const occurredAt = parseDate(pick(row, "orderDateTime", "orderDate"));
   if (!externalId || !occurredAt) return null;
+
+  const quantity = Math.max(1, Math.round(parseAmount(pick(row, "quantity")) || 1));
+  // priceInclVat is de prijs per stuk; met quantity erbij is dat de orderwaarde.
+  const unitPrice = parseAmount(pick(row, "priceInclVat", "priceExclVat"));
+
+  // Alleen sites die je wilt volgen, als je dat hebt ingevuld.
+  const siteFilter = settings.siteId?.trim();
+  if (siteFilter) {
+    const allowed = siteFilter.split(/[,\s;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const site = String(pick(row, "siteCode", "siteName") ?? "").toLowerCase();
+    if (allowed.length > 0 && site && !allowed.includes(site)) return null;
+  }
 
   return {
     externalId,
     occurredAt,
-    status: normaliseStatus(pick(row, "status", "transactionStatus", "state", "statuslabel")),
-    currency: normaliseCurrency(pick(row, "currency", "currencyCode"), "EUR"),
-    commission: parseAmount(
-      pick(row, "commission", "commissionAmount", "vergoeding", "provisie", "earnings"),
-    ),
-    saleAmount: parseAmount(
-      pick(row, "orderAmount", "saleAmount", "totalAmount", "omzet", "amount"),
-    ),
-    programId: optionalString(pick(row, "categoryId", "productGroupId")),
+    status: mapStatus(item),
+    currency: "EUR",
+    commission: parseAmount(pick(row, "commission")),
+    saleAmount: unitPrice * quantity,
+    programId: optionalString(pick(row, "productId")),
+    // Per product groeperen is voor bol.com nuttiger dan per programma: je ziet
+    // welke artikelen je geld opleveren.
     programName:
-      optionalString(pick(row, "categoryName", "productGroup", "categorie", "productTitle")) ??
+      optionalString(pick(row, "productTitle")) ??
+      optionalString(pick(row, "siteName")) ??
       "bol.com",
-    countryCode: optionalString(pick(row, "country", "countryCode")) ?? "NL",
+    countryCode: "NL",
   };
+}
+
+/**
+ * bol geeft naast een tekstuele status ook twee vlaggen. Die zijn eenduidiger
+ * dan de tekst, dus die gaan voor.
+ */
+function mapStatus(item: BolOrderItem): TransactionStatus {
+  if (item.approvedForPayment === true) return "approved";
+  if (item.statusFinal === true && item.approvedForPayment === false) return "rejected";
+  return normaliseStatus(item.status);
+}
+
+/**
+ * Clicks en impressies komen uit het promotierapport. Dat kent geen datum-as —
+ * het geeft een totaal over de opgevraagde periode — dus voor dagcijfers is één
+ * aanroep per dag nodig. Daarom staat dit uit tenzij je het aanzet, en dan
+ * hoogstens over de laatste week.
+ */
+async function fetchDailyStats(
+  ctx: AdapterContext,
+  token: string,
+  warnings: string[],
+): Promise<NormalisedDailyStat[]> {
+  if (ctx.settings.fetchClicks !== "ja") return [];
+
+  const stats: NormalisedDailyStat[] = [];
+  const lastDay = toIsoDate(ctx.range.to);
+
+  try {
+    for (let back = 0; back < CLICK_DAYS; back += 1) {
+      const day = addDays(lastDay, -back);
+      const date = new Date(`${day}T12:00:00Z`);
+      const items = await loadReport<Record<string, unknown>>(
+        ctx.settings,
+        token,
+        PROMOTION_REPORT,
+        date,
+        date,
+        "bol.com promotierapport",
+      );
+      const entry: NormalisedDailyStat = { day, impressions: 0, clicks: 0, sales: 0 };
+      for (const item of items) {
+        entry.impressions += Math.round(parseAmount(pick(item, "impressions")));
+        entry.clicks += Math.round(parseAmount(pick(item, "clicks")));
+        entry.sales += Math.round(parseAmount(pick(item, "orders")));
+      }
+      stats.push(entry);
+    }
+  } catch (error) {
+    warnings.push(
+      `Clicks en impressies van bol.com konden niet worden opgehaald (${
+        error instanceof Error ? error.message : "onbekende fout"
+      }). Commissies zijn wel bijgewerkt.`,
+    );
+  }
+  return stats;
 }
 
 async function testConnection(
   ctx: Omit<AdapterContext, "range">,
 ): Promise<TestResult> {
-  // De tokenwissel is het deel dat we met zekerheid kunnen valideren.
-  await accessToken(ctx.credentials, ctx.settings);
+  const token = await accessToken(ctx.credentials, ctx.settings);
 
-  if (ctx.settings.useApi !== "ja") {
-    return {
-      ok: true,
-      message:
-        "Inloggen bij bol.com werkt. Dit account staat op CSV-import, dus er wordt niets via de API opgehaald — upload je export onderaan deze pagina.",
-    };
-  }
-
+  const to = new Date();
+  const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
   try {
-    const to = new Date();
-    const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const rows = await loadRows(ctx, { from, to });
+    const items = await loadReport<BolOrderItem>(
+      ctx.settings,
+      token,
+      ctx.settings.reportPath || ORDER_REPORT,
+      from,
+      to,
+      "bol.com orderrapport",
+    );
+
+    const sites = new Set(
+      items.map((item) => item.siteName).filter((name): name is string => Boolean(name)),
+    );
+    const details: Record<string, string> = {};
+    for (const site of [...sites].slice(0, 10)) details[site] = "";
+
     return {
       ok: true,
-      message: rows.length
-        ? `Verbonden. ${rows.length} regel(s) over de laatste 7 dagen.`
-        : "Inloggen gelukt en het rapport is bereikbaar, maar leeg over de laatste 7 dagen.",
+      message: items.length
+        ? `Verbonden. ${items.length} orderregel(s) over de laatste 30 dagen${
+            sites.size > 0 ? `, van ${sites.size} site(s)` : ""
+          }.`
+        : "Verbonden, maar het orderrapport was leeg over de laatste 30 dagen.",
+      details,
     };
   } catch (error) {
-    return {
-      ok: false,
-      message: `Inloggen bij bol.com lukt, maar het rapport-pad werkt niet: ${
-        error instanceof Error ? error.message : "onbekende fout"
-      } Pas het pad aan of gebruik de CSV-import.`,
-    };
+    const message = error instanceof Error ? error.message : "onbekende fout";
+    if (message.includes("403")) {
+      return {
+        ok: false,
+        message:
+          "Inloggen bij bol.com lukt, maar het orderrapport geeft 403. Meestal betekent dat je API-toegang nog niet is vrijgegeven voor het partnerprogramma — vraag dat aan via je affiliate-account (Handleiding toegang API). " +
+          message,
+      };
+    }
+    return { ok: false, message };
   }
 }
 
@@ -191,10 +289,10 @@ function optionalString(value: unknown): string | null {
 export const bolAdapter: NetworkAdapter = {
   id: "bol",
   name: "bol.com",
-  docsUrl: "https://api.bol.com/",
+  docsUrl: "https://api.bol.com/marketing/docs/affiliate-reports-api/index.html",
   credentialsHelp:
-    "Maak client-credentials aan in je bol.com partneraccount. Let op: bol.com verandert zijn rapportage-endpoint af en toe. Werkt de API niet, gebruik dan de CSV-import — die is voor bol.com de meest betrouwbare route.",
-  maturity: "needs-verification",
+    "Maak client-credentials aan in je bol.com affiliate-account (Handleiding toegang API). Werkt de verbindingstest wel maar het rapport niet, dan staat je API-toegang nog niet open — dat vraag je aan bij bol.",
+  maturity: "verified",
   fields: [
     {
       name: "clientId",
@@ -211,26 +309,26 @@ export const bolAdapter: NetworkAdapter = {
       required: true,
     },
     {
-      name: "useApi",
-      label: "Hoe halen we bol.com op",
+      name: "siteId",
+      label: "Alleen deze sites",
+      type: "text",
+      secret: false,
+      required: false,
+      help:
+        "Optioneel. Vul de sitecode of sitenaam in om tot die site(s) te beperken; meerdere mag met een komma. Leeg laten haalt al je sites op.",
+    },
+    {
+      name: "fetchClicks",
+      label: "Clicks en impressies ophalen",
       type: "select",
       secret: false,
       required: false,
       options: [
-        { value: "nee", label: "CSV-import (aanbevolen)" },
-        { value: "ja", label: "Via de API proberen" },
+        { value: "nee", label: "Nee (aanbevolen)" },
+        { value: "ja", label: "Ja, laatste 7 dagen" },
       ],
       help:
-        "bol.com heeft geen stabiel gedocumenteerd rapportage-endpoint voor partners; met een geldig token gaf het pad HTTP 403. Daarom staat de API uit en gebruik je de CSV-import onderaan deze pagina. Weet je het juiste pad, zet de API dan aan en vul het hieronder in.",
-    },
-    {
-      name: "siteId",
-      label: "Site-id",
-      type: "text",
-      secret: false,
-      required: false,
-      help: "Optioneel, als je meerdere sites in je partneraccount hebt.",
-      showWhen: { field: "useApi", value: "ja" },
+        "Het promotierapport van bol geeft een totaal over een periode, niet per dag. Voor dagcijfers is dus één aanroep per dag nodig; daarom hoogstens een week. Zonder dit werken je commissies en grafieken gewoon.",
     },
     {
       name: "reportPath",
@@ -238,19 +336,8 @@ export const bolAdapter: NetworkAdapter = {
       type: "text",
       secret: false,
       required: false,
-      placeholder: DEFAULT_PATH,
-      help: "Het pad achter api.bol.com waar je transacties staan.",
-      showWhen: { field: "useApi", value: "ja" },
-    },
-    {
-      name: "acceptHeader",
-      label: "Accept-header",
-      type: "text",
-      secret: false,
-      required: false,
-      placeholder: DEFAULT_ACCEPT,
-      help: "bol.com versioneert via deze header, bijvoorbeeld application/vnd.partner.v1+json.",
-      showWhen: { field: "useApi", value: "ja" },
+      placeholder: ORDER_REPORT,
+      help: "Alleen aanpassen als bol je een ander rapport heeft gegeven.",
     },
     {
       name: "baseUrl",
