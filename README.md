@@ -123,6 +123,12 @@ Wat dat praktisch betekent:
 het netwerk op *Nog een* en geef het een eigen naam. Elk account krijgt dan zijn
 eigen sleutels, sync-status en foutmeldingen.
 
+**Daisycon filtert op een datumsoort.** Je kiest bij het account of de app op
+clickdatum, goedkeuringsdatum of laatst-gewijzigd filtert. Clickdatum is de
+standaard: dan staat een transactie op de dag dat de bezoeker klikte, wat past
+bij de grafieken. Wil je vooral latere goedkeuringen oppikken, kies dan
+'laatst gewijzigd'.
+
 **Clicks en impressies bij Awin** staan standaard uit. Awin rapporteert die
 alleen als totaal over een periode, niet als reeks per dag, dus voor dagcijfers
 is één API-aanroep per dag nodig. Zet je het aan, dan haalt de app hoogstens de

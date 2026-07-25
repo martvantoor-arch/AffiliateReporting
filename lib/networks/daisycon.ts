@@ -24,6 +24,15 @@ function base(settings: Record<string, string>): string {
   return (settings.baseUrl || DEFAULT_BASE).replace(/\/+$/, "");
 }
 
+/** Daisycon wil datums als "YYYY-MM-DD HH:II:SS", niet als losse datum. */
+function startOfDayText(date: Date): string {
+  return `${toIsoDate(date)} 00:00:00`;
+}
+
+function endOfDayText(date: Date): string {
+  return `${toIsoDate(date)} 23:59:59`;
+}
+
 /**
  * Daisycon kent twee manieren van authenticeren. Basic auth met je
  * accountgegevens is het snelst in te stellen; OAuth2 met een refresh-token is
@@ -113,13 +122,20 @@ async function fetchTransactions(ctx: AdapterContext): Promise<FetchResult> {
   for (const publisherId of ids) {
     for (const chunk of chunkRange(ctx.range.from, ctx.range.to, MAX_DAYS_PER_CALL)) {
       for (let page = 1; page <= MAX_PAGES; page += 1) {
+        // Daisycon wil geen algemene start_date, maar een datumsoort met tijd
+        // erin: "A valid start (click, approval or modified) date required
+        // (YYYY-MM-DD HH:II:SS)". Welke soort is instelbaar; zie het veld
+        // dateType hieronder.
+        const kind = ctx.settings.dateType || "click";
         const params = new URLSearchParams({
-          start_date: toIsoDate(chunk.from),
-          end_date: toIsoDate(chunk.to),
+          [`start_${kind}_date`]: startOfDayText(chunk.from),
+          [`end_${kind}_date`]: endOfDayText(chunk.to),
           page: String(page),
           per_page: String(PER_PAGE),
         });
-        const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/transactions?${params}`;
+        // De spatie in de tijd moet als %20 over de lijn, niet als '+'.
+        const query = params.toString().replace(/\+/g, "%20");
+        const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/transactions?${query}`;
         const response = await request(url, { headers, label: "Daisycon" });
         const text = await response.text();
         const rows = safeJsonArray(text);
@@ -193,13 +209,15 @@ async function fetchDailyStats(
   const perDay = new Map<string, NormalisedDailyStat>();
   for (const publisherId of ids) {
     try {
+      // Zelfde datumeis als bij de transacties; zie startOfDayText.
       const params = new URLSearchParams({
-        start_date: toIsoDate(ctx.range.from),
-        end_date: toIsoDate(ctx.range.to),
+        start_date: startOfDayText(ctx.range.from),
+        end_date: endOfDayText(ctx.range.to),
         interval: "day",
         per_page: "1000",
       });
-      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/statistics?${params}`;
+      const query = params.toString().replace(/\+/g, "%20");
+      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/statistics?${query}`;
       const response = await request(url, { headers, label: "Daisycon statistieken" });
       const rows = safeJsonArray(await response.text());
       for (const row of rows) {
@@ -338,6 +356,20 @@ export const daisyconAdapter: NetworkAdapter = {
       required: false,
       placeholder: "Leeg laten = automatisch ophalen",
       help: "Meerdere id's mag je scheiden met een komma.",
+    },
+    {
+      name: "dateType",
+      label: "Filteren op welke datum",
+      type: "select",
+      secret: false,
+      required: false,
+      options: [
+        { value: "click", label: "Clickdatum (aanbevolen)" },
+        { value: "approval", label: "Goedkeuringsdatum" },
+        { value: "modified", label: "Laatst gewijzigd" },
+      ],
+      help:
+        "Daisycon wil weten op welke datum je filtert. Clickdatum zet een transactie op de dag dat de bezoeker klikte; dat past bij de grafieken. 'Laatst gewijzigd' is handig als je vooral latere goedkeuringen wilt oppikken.",
     },
     {
       name: "baseUrl",
