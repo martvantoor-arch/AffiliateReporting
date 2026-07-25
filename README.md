@@ -205,24 +205,47 @@ Dat is de route die werkt en die getest is.
 Railway bouwt de `Dockerfile` uit deze repo; `railway.json` zet de healthcheck en
 het herstartbeleid al goed. Wat je zelf doet:
 
-1. **Nieuw project → Deploy from GitHub repo**, kies deze repo en de branch.
-2. **Voeg een volume toe** en zet het mountpad op `/data`. Doe dit vóór de eerste
-   deploy. Zonder volume staat je database op de container zelf en ben je hem bij
-   de volgende deploy kwijt.
-3. **Zet de variabelen** onder Variables:
+**1. Project aanmaken.** *New Project → Deploy from GitHub repo*, kies deze repo
+en de branch. Railway ziet de `Dockerfile` en begint te bouwen. Laat die eerste
+build gerust mislukken of half af zijn; we zetten eerst de rest goed.
 
-   | Variabele | Waarde |
-   |---|---|
-   | `DATABASE_URL` | `file:/data/kasboek.db` |
-   | `ENCRYPTION_KEY` | `openssl rand -hex 32` |
-   | `SESSION_SECRET` | `openssl rand -hex 32` |
-   | `AUTO_SYNC_MINUTES` | `60` (of leeglaten; 60 is de standaard) |
-   | `APP_TIMEZONE` | `Europe/Amsterdam` |
+**2. Volume toevoegen — doe dit vóórdat je de app gaat gebruiken.** Zonder volume
+staat je database in de container en ben je hem bij de volgende deploy kwijt. In
+het project:
 
-   `PORT` zet Railway zelf; die hoef je niet op te geven. Een `CRON_SECRET` heb je
-   niet nodig, want de app haalt zijn cijfers zelf op.
-4. **Genereer een domein** onder Settings → Networking. Railway regelt HTTPS.
-5. Open het domein en maak je account aan. Daarna is registreren dicht.
+- Druk **⌘K** (of Ctrl+K) en kies de optie om een volume aan te maken. Rechtsklikken
+  op het projectcanvas werkt ook — daar staat dezelfde optie in het menu.
+- Railway vraagt aan welke service het volume moet hangen; kies je app-service.
+- Zet het **mount path** op `/data`.
+
+Het volume wordt bij het starten van de container aangekoppeld, niet tijdens de
+build. Een service met een volume kan niet twee deployments tegelijk actief
+hebben, dus bij elke nieuwe deploy is er even downtime. Dat is normaal.
+
+**3. Variabelen zetten** onder *Variables*:
+
+| Variabele | Waarde |
+|---|---|
+| `DATABASE_URL` | `file:/data/kasboek.db` |
+| `ENCRYPTION_KEY` | uitvoer van `openssl rand -hex 32` |
+| `SESSION_SECRET` | uitvoer van `openssl rand -hex 32` |
+| `APP_TIMEZONE` | `Europe/Amsterdam` |
+| `RAILWAY_RUN_UID` | `0` |
+
+Die laatste heeft uitleg nodig. Railway koppelt een volume aan als eigendom van
+root, dus een container die meteen als gewone gebruiker start kan er niets in
+schrijven. Met `RAILWAY_RUN_UID=0` start de container als root; de entrypoint zet
+dan de rechten op `/data` goed en zakt daarna zelf terug naar een onbevoorrechte
+gebruiker (uid 10001). De app draait dus alsnog niet als root.
+
+`PORT` zet Railway zelf. `AUTO_SYNC_MINUTES` kun je weglaten, want 60 is de
+standaard, en een `CRON_SECRET` heb je niet nodig — de app haalt zijn cijfers zelf
+op.
+
+**4. Domein aanzetten** onder *Settings → Networking → Generate Domain*. Railway
+regelt HTTPS.
+
+**5. Openen en je account aanmaken.** Daarna gaat registreren automatisch dicht.
 
 Je hebt dus **geen tweede service voor een cron** nodig: de planner loopt in het
 app-proces mee. Laat `numReplicas` daarom op 1 staan — bij meerdere instanties
@@ -244,8 +267,9 @@ docker run -d --name kasboek -p 3000:3000 \
 ```
 
 Het volume `/data` houdt de database vast; bij het opstarten zet de app het
-schema klaar. Zet er een reverse proxy met TLS voor (Caddy of Traefik regelt een
-certificaat automatisch).
+schema klaar. De container start als root om de rechten op het volume goed te
+zetten en draait de app daarna als uid 10001. Zet er een reverse proxy met TLS
+voor (Caddy of Traefik regelt een certificaat automatisch).
 
 ### Zonder Docker
 
@@ -419,7 +443,8 @@ is de reden dat één codebase op beide kan draaien — zie `lib/db.ts`.
   functies kun je `?lookbackDays=` verlagen of per netwerk syncen.
 - Cloudflare Workers werkt nog niet, door een openstaande bug in Prisma. Zie
   [Deployen](#deployen) voor wat er precies gebeurt en welke twee routes er zijn.
-- De `Dockerfile` is geschreven maar niet door mij gebouwd: in de omgeving waar
-  deze code is gemaakt was geen Docker-daemon beschikbaar. De losse stappen erin
-  (`npm ci`, `npm run build`, `prisma db push`, `next start`) zijn wel allemaal
-  getest.
+- De `Dockerfile` is niet als image gebouwd: in de omgeving waar deze code is
+  gemaakt was geen Docker-daemon beschikbaar. De stappen erin zijn wel los
+  getest, inclusief de entrypoint tegen een root-eigen `/data`: rechten zetten,
+  terugzakken naar uid 10001, schema aanmaken, en bij een tweede start de
+  bestaande data ongemoeid laten.

@@ -43,8 +43,10 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV DATABASE_URL="file:/data/kasboek.db"
 
-# Niet als root draaien.
-RUN useradd --system --create-home --uid 10001 kasboek \
+# De app draait niet als root. De container start wél als root, want een gemount
+# volume is eigendom van root en die rechten moeten eerst goed; de entrypoint
+# zakt daarna terug naar deze gebruiker.
+RUN useradd --system --create-home --uid 10001 --user-group kasboek \
   && mkdir -p /data \
   && chown -R kasboek:kasboek /data
 
@@ -60,10 +62,11 @@ COPY --from=build --chown=kasboek:kasboek /app/next.config.ts ./next.config.ts
 COPY --chown=kasboek:kasboek docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 
-USER kasboek
+# Bewust geen USER-regel: zie de opmerking hierboven. De entrypoint laat de app
+# als uid 10001 draaien, niet als root.
 VOLUME ["/data"]
 EXPOSE 3000
 
-# De entrypoint zet bij de eerste start de tabellen klaar.
+# De entrypoint zet de rechten goed en de tabellen klaar.
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "run", "start"]
