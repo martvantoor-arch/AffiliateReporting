@@ -1,3 +1,4 @@
+import { addDays } from "@/lib/dates";
 import { AdapterError, chunkRange, pick, requestJson, toNaiveIso } from "@/lib/networks/http";
 import {
   normaliseCurrency,
@@ -109,9 +110,20 @@ function mapTransaction(row: AwinTransaction): NormalisedTransaction | null {
   };
 }
 
+/** Hoeveel dagen clicks we maximaal ophalen; zie fetchDailyStats. */
+const CLICK_DAYS = 7;
+
 /**
- * Clicks en impressies komen uit een apart rapport. Mislukt dat, dan is dat
- * geen reden om de commissies weg te gooien — het wordt een waarschuwing.
+ * Clicks en impressies, als je die aanzet.
+ *
+ * Awin's rapportages geven een **totaal over een periode**, niet een reeks per
+ * dag. Om toch dagcijfers te krijgen moet je het rapport één keer per dag
+ * opvragen, en dat kost dus een aanroep per dag. Daarom staat dit uit tenzij je
+ * het aanvinkt, en halen we hoogstens de laatste week op — genoeg voor de
+ * tegels "per click" en "conversie", zonder je API-limiet op te eten.
+ *
+ * Mislukt het, dan is dat geen reden om de commissies weg te gooien: het wordt
+ * een waarschuwing.
  */
 async function fetchDailyStats(
   ctx: AdapterContext,
@@ -120,32 +132,44 @@ async function fetchDailyStats(
 ): Promise<NormalisedDailyStat[]> {
   const publisherId = ctx.settings.publisherId?.trim();
   if (!publisherId) return [];
+  if (ctx.settings.fetchClicks !== "ja") return [];
+
+  // Awin eist een regio-lijst; zonder die parameter volgt HTTP 400
+  // ("invalid region code list, expecting sth. like [FR,CA,DE]").
+  const region = ctx.settings.region?.trim() || "NL";
+
   const stats: NormalisedDailyStat[] = [];
+  const lastDay = toNaiveIso(ctx.range.to).slice(0, 10);
+  const days: string[] = [];
+  for (let back = 0; back < CLICK_DAYS; back += 1) {
+    days.push(addDays(lastDay, -back));
+  }
+
   try {
-    const params = new URLSearchParams({
-      startDate: toNaiveIso(ctx.range.from).slice(0, 10),
-      endDate: toNaiveIso(ctx.range.to).slice(0, 10),
-      timezone: awinTimezone(ctx.timezone),
-      period: "day",
-    });
-    const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/reports/creative?${params}`;
-    const rows = await requestJson<Record<string, unknown>[]>(url, {
-      headers,
-      label: "Awin rapportage",
-    });
-    if (!Array.isArray(rows)) return [];
-    const perDay = new Map<string, NormalisedDailyStat>();
-    for (const row of rows) {
-      const day = parseDate(pick(row, "date", "day"))?.toISOString().slice(0, 10);
-      if (!day) continue;
-      const entry =
-        perDay.get(day) ?? { day, impressions: 0, clicks: 0, sales: 0 };
-      entry.impressions += Math.round(parseAmount(pick(row, "impressions")));
-      entry.clicks += Math.round(parseAmount(pick(row, "clicks")));
-      entry.sales += Math.round(parseAmount(pick(row, "quantity", "sales")));
-      perDay.set(day, entry);
+    for (const day of days) {
+      const params = new URLSearchParams({
+        startDate: day,
+        endDate: day,
+        region,
+        timezone: awinTimezone(ctx.timezone),
+        dateType: "transaction",
+      });
+      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/reports/advertiser?${params}`;
+      const rows = await requestJson<Record<string, unknown>[]>(url, {
+        headers,
+        label: "Awin rapportage",
+      });
+      if (!Array.isArray(rows)) continue;
+
+      // Het rapport staat per adverteerder; wij tellen op naar één dagtotaal.
+      const entry: NormalisedDailyStat = { day, impressions: 0, clicks: 0, sales: 0 };
+      for (const row of rows) {
+        entry.impressions += Math.round(parseAmount(pick(row, "impressions")));
+        entry.clicks += Math.round(parseAmount(pick(row, "clicks")));
+        entry.sales += Math.round(parseAmount(pick(row, "quantity", "sales", "transactionCount")));
+      }
+      stats.push(entry);
     }
-    stats.push(...perDay.values());
   } catch (error) {
     warnings.push(
       `Clicks en impressies van Awin konden niet worden opgehaald (${
@@ -226,6 +250,29 @@ export const awinAdapter: NetworkAdapter = {
       secret: true,
       required: true,
       help: "Het OAuth2-token uit Awin (Gereedschap → API-credentials).",
+    },
+    {
+      name: "fetchClicks",
+      label: "Clicks en impressies ophalen",
+      type: "select",
+      secret: false,
+      required: false,
+      options: [
+        { value: "nee", label: "Nee (aanbevolen)" },
+        { value: "ja", label: "Ja, laatste 7 dagen" },
+      ],
+      help:
+        "Awin geeft clicks alleen als totaal over een periode, niet per dag. Voor dagcijfers is dus één aanroep per dag nodig; daarom hoogstens een week. Zonder dit werken je commissies en grafieken gewoon, alleen de tegels 'per click' en 'conversie' blijven leeg.",
+    },
+    {
+      name: "region",
+      label: "Regio",
+      type: "text",
+      secret: false,
+      required: false,
+      placeholder: "NL",
+      help: "Landcode voor de rapportage, bijvoorbeeld NL of GB. Alleen nodig als je clicks ophaalt.",
+      showWhen: { field: "fetchClicks", value: "ja" },
     },
     {
       name: "baseUrl",

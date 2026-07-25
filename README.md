@@ -119,6 +119,17 @@ Wat dat praktisch betekent:
   netwerken worden gewoon bijgewerkt en de foutmelding van het netwerk komt
   letterlijk in de app te staan.
 
+**Meerdere sites bij hetzelfde netwerk** koppel je als losse accounts: klik bij
+het netwerk op *Nog een* en geef het een eigen naam. Elk account krijgt dan zijn
+eigen sleutels, sync-status en foutmeldingen.
+
+**Clicks en impressies bij Awin** staan standaard uit. Awin rapporteert die
+alleen als totaal over een periode, niet als reeks per dag, dus voor dagcijfers
+is één API-aanroep per dag nodig. Zet je het aan, dan haalt de app hoogstens de
+laatste 7 dagen op en heb je ook een regio nodig (bijvoorbeeld `NL`). Zonder dit
+werken je commissies en alle grafieken gewoon; alleen de tegels "per click" en
+"conversie" blijven leeg.
+
 **bol.com verdient een aparte waarschuwing.** Het partnerprogramma wijzigt zijn
 rapportage-endpoint met enige regelmaat en er is geen stabiele publieke
 documentatie voor de affiliate-kant. De OAuth2-tokenwissel (`login.bol.com`) is
