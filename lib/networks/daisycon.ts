@@ -124,12 +124,14 @@ async function fetchTransactions(ctx: AdapterContext): Promise<FetchResult> {
       for (let page = 1; page <= MAX_PAGES; page += 1) {
         // Daisycon wil geen algemene start_date, maar een datumsoort met tijd
         // erin: "A valid start (click, approval or modified) date required
-        // (YYYY-MM-DD HH:II:SS)". Welke soort is instelbaar; zie het veld
-        // dateType hieronder.
+        // (YYYY-MM-DD HH:II:SS)". De namen zijn date_<soort>_start en
+        // date_<soort>_end — niet start_<soort>_date, wat een eerdere poging
+        // van mij was en dezelfde foutmelding opleverde. Welke soort is
+        // instelbaar; zie het veld dateType hieronder.
         const kind = ctx.settings.dateType || "click";
         const params = new URLSearchParams({
-          [`start_${kind}_date`]: startOfDayText(chunk.from),
-          [`end_${kind}_date`]: endOfDayText(chunk.to),
+          [`date_${kind}_start`]: startOfDayText(chunk.from),
+          [`date_${kind}_end`]: endOfDayText(chunk.to),
           page: String(page),
           per_page: String(PER_PAGE),
         });

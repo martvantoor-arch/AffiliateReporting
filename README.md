@@ -123,6 +123,10 @@ Wat dat praktisch betekent:
 het netwerk op *Nog een* en geef het een eigen naam. Elk account krijgt dan zijn
 eigen sleutels, sync-status en foutmeldingen.
 
+**Welke versie staat er live?** `GET /api/health` geeft naast de status ook de
+korte commit-hash van de draaiende versie. Handig om te zien of een herstelde
+fout al gedeployd is voordat je in de code gaat zoeken.
+
 **Daisycon filtert op een datumsoort.** Je kiest bij het account of de app op
 clickdatum, goedkeuringsdatum of laatst-gewijzigd filtert. Clickdatum is de
 standaard: dan staat een transactie op de dag dat de bezoeker klikte, wat past
