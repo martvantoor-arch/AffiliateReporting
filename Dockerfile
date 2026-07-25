@@ -64,7 +64,12 @@ RUN chmod +x ./docker-entrypoint.sh
 
 # Bewust geen USER-regel: zie de opmerking hierboven. De entrypoint laat de app
 # als uid 10001 draaien, niet als root.
-VOLUME ["/data"]
+#
+# Bewust ook geen VOLUME-regel: Railway weigert die ("docker VOLUME is not
+# supported, use Railway Volumes") en je hebt hem niet nodig. Een volume koppel
+# je van buiten aan, met `docker run -v` of via Railway; VOLUME zou alleen een
+# anoniem volume als standaard aankondigen, en dat levert eerder verdwaalde
+# volumes op dan gemak.
 EXPOSE 3000
 
 # De entrypoint zet de rechten goed en de tabellen klaar.
