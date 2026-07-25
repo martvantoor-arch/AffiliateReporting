@@ -18,7 +18,8 @@
     "cf:build": "node scripts/generate-prisma.mjs workerd && opennextjs-cloudflare build",
     "cf:preview": "npm run cf:build && opennextjs-cloudflare preview",
     "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy",
-    "generate": "node scripts/generate-prisma.mjs"
+    "generate": "node scripts/generate-prisma.mjs",
+    "admin": "tsx scripts/admin.ts"
   },
   "overrides": {
     "postcss": "^8.5.23",

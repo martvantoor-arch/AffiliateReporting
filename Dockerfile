@@ -39,6 +39,9 @@ RUN npm run build
 FROM base AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# Anders zet npm bij elke start een update-melding op stderr, en die komt in
+# Railway's logs als rode "error"-regel te staan. Rood moet rood betekenen.
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV DATABASE_URL="file:/data/kasboek.db"

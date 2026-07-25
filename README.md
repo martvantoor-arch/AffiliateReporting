@@ -16,6 +16,7 @@ netwerken zelf en de ECB voor wisselkoersen.
 - [Netwerken koppelen](#netwerken-koppelen)
 - [Automatisch ophalen](#automatisch-ophalen)
 - [Beveiliging](#beveiliging)
+- [Als je jezelf buitensluit](#als-je-jezelf-buitensluit)
 - [Deployen](#deployen)
 - [Een netwerk toevoegen](#een-netwerk-toevoegen)
 - [Ontwikkelen](#ontwikkelen)
@@ -195,6 +196,30 @@ iedereen uitgelogd.
 Zet de app achter HTTPS. Zonder TLS gaan je wachtwoord en sessiecookie in
 leesbare vorm over de lijn.
 
+## Als je jezelf buitensluit
+
+Er is geen wachtwoord-herstel via e-mail — de app stuurt geen mail, en een
+herstelknop op internet zou een achterdeur zijn in een app met je financiële
+gegevens. In plaats daarvan is er een beheerscript, te draaien op de machine
+waar de database staat:
+
+```bash
+npm run admin -- lijst                     # welke accounts zijn er
+npm run admin -- wachtwoord jij@mail.nl    # nieuw wachtwoord, wordt getoond
+npm run admin -- tweestaps-uit jij@mail.nl # authenticator kwijt
+npm run admin -- verwijder jij@mail.nl     # account en al zijn gegevens weg
+```
+
+`wachtwoord` en `tweestaps-uit` verwijderen ook alle actieve sessies, dus
+apparaten die nog ingelogd waren zijn dat daarna niet meer. `verwijder` haalt
+via de database-cascade ook de netwerkkoppelingen en transacties weg; is het
+laatste account weg, dan laat de app weer een registratie toe.
+
+Op Railway kom je met `railway ssh` in de container en geef je daar hetzelfde
+commando. Wil je liever helemaal opnieuw beginnen, dan kun je ook het volume
+verwijderen in Railway: bij de volgende start maakt de app een lege database
+aan en staat registreren weer open.
+
 ## Deployen
 
 De app draait als gewone Next.js-applicatie op Node, met SQLite als database.
@@ -366,6 +391,7 @@ npm run lint       # ESLint
 npm run build      # productiebuild, inclusief typecheck
 npm run generate   # Prisma-client opnieuw genereren na een schemawijziging
 npm run db:studio  # database bekijken
+npm run admin      # accounts beheren (zie hierboven)
 ```
 
 Wijzig je `prisma/schema.prisma`, dan draai je `npm run setup` (genereren én de
@@ -393,7 +419,7 @@ lib/
 instrumentation.ts   start de planner bij het opstarten van de server
 migrations/          SQL-migraties voor D1 (wrangler)
 prisma/schema.prisma datamodel
-scripts/             Prisma-client genereren per doelplatform
+scripts/             Prisma-client genereren, en accountbeheer (admin.ts)
 tests/               unit tests voor de foutgevoelige pure logica
 ```
 
