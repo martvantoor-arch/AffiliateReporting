@@ -9,6 +9,13 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // Eerst melden of de configuratie klopt; dat scheelt zoeken als een pagina
+  // een serverfout geeft.
+  const { runStartupCheck } = await import("@/lib/startup-check");
+  await runStartupCheck().catch((error) => {
+    console.error("[start] Controle bij opstarten mislukte:", error);
+  });
+
   const { startScheduler } = await import("@/lib/scheduler");
   startScheduler();
 }
