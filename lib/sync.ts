@@ -31,6 +31,59 @@ interface SyncOptions {
   trigger?: "manual" | "cron" | "onboarding";
 }
 
+export interface UserSyncReport {
+  email: string;
+  upserted: number;
+  failed: number;
+  error?: string;
+  accounts?: {
+    network: string;
+    label: string;
+    ok: boolean;
+    upserted: number;
+    message: string;
+  }[];
+}
+
+/**
+ * Werkt alle gebruikers bij. Wordt gebruikt door de ingebouwde planner
+ * (instrumentation.ts) en door het cron-endpoint, zodat beide hetzelfde pad
+ * volgen. Een gebruiker die faalt stopt de rest niet.
+ */
+export async function syncAllUsers(
+  lookbackDays = DEFAULT_LOOKBACK_DAYS,
+): Promise<UserSyncReport[]> {
+  const users = await prisma.user.findMany({ select: { id: true, email: true } });
+  const report: UserSyncReport[] = [];
+
+  for (const user of users) {
+    try {
+      const summary = await syncUser(user.id, { lookbackDays, trigger: "cron" });
+      report.push({
+        email: user.email,
+        upserted: summary.upserted,
+        failed: summary.failed,
+        accounts: summary.results.map((result) => ({
+          network: result.network,
+          label: result.label,
+          ok: result.ok,
+          upserted: result.upserted,
+          message: result.message,
+        })),
+      });
+    } catch (error) {
+      report.push({
+        email: user.email,
+        upserted: 0,
+        failed: 1,
+        error: error instanceof Error ? error.message : "Onbekende fout.",
+      });
+    }
+  }
+
+  return report;
+}
+
 /**
  * Haalt bij alle actieve accounts van een gebruiker de recente transacties op.
  * Eén stuk netwerk dat kapot is mag de rest niet blokkeren, dus elke account

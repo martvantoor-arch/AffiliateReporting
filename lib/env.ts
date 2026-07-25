@@ -61,3 +61,18 @@ export const isProduction = process.env.NODE_ENV === "production";
 
 /** Standaard tijdzone voor dag-groepering van transacties. */
 export const defaultTimezone = process.env.APP_TIMEZONE?.trim() || "Europe/Amsterdam";
+
+/**
+ * Hoe vaak de app zelf cijfers ophaalt, in minuten. 0 zet het uit; gebruik dan
+ * een externe cron op /api/cron/sync. In development staat het altijd uit, zodat
+ * je tijdens het bouwen niet ongevraagd de netwerken aanroept.
+ */
+export function autoSyncMinutes(): number {
+  if (!isProduction) return 0;
+  const raw = process.env.AUTO_SYNC_MINUTES?.trim();
+  if (raw === undefined || raw === "") return 60;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  // Onder een kwartier heeft geen zin: netwerken werken niet sneller bij.
+  return Math.max(15, parsed);
+}

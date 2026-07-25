@@ -1,8 +1,7 @@
-import { constantTimeEqual } from "@/lib/crypto";
-import { prisma } from "@/lib/db";
-import { cronSecret } from "@/lib/env";
 import { pruneExpiredSessions } from "@/lib/auth/session";
-import { syncUser, DEFAULT_LOOKBACK_DAYS } from "@/lib/sync";
+import { constantTimeEqual } from "@/lib/crypto";
+import { cronSecret } from "@/lib/env";
+import { syncAllUsers, DEFAULT_LOOKBACK_DAYS } from "@/lib/sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -42,32 +41,7 @@ export async function GET(request: Request): Promise<Response> {
       ? Math.min(lookbackParam, 730)
       : DEFAULT_LOOKBACK_DAYS;
 
-  const users = await prisma.user.findMany({ select: { id: true, email: true } });
-  const report: Record<string, unknown>[] = [];
-
-  for (const user of users) {
-    try {
-      const summary = await syncUser(user.id, { lookbackDays, trigger: "cron" });
-      report.push({
-        user: user.email,
-        upserted: summary.upserted,
-        failed: summary.failed,
-        accounts: summary.results.map((result) => ({
-          network: result.network,
-          label: result.label,
-          ok: result.ok,
-          upserted: result.upserted,
-          message: result.message,
-        })),
-      });
-    } catch (error) {
-      report.push({
-        user: user.email,
-        error: error instanceof Error ? error.message : "Onbekende fout.",
-      });
-    }
-  }
-
+  const report = await syncAllUsers(lookbackDays);
   const prunedSessions = await pruneExpiredSessions();
 
   return Response.json({

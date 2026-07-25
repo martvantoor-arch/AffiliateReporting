@@ -58,7 +58,6 @@ npm install
 cp .env.example .env
 openssl rand -hex 32   # zet dit bij ENCRYPTION_KEY
 openssl rand -hex 32   # zet dit bij SESSION_SECRET
-openssl rand -hex 24   # zet dit bij CRON_SECRET (alleen nodig voor automatisch ophalen)
 
 # 3. Database aanmaken
 npm run setup
@@ -140,22 +139,33 @@ op.
 
 ## Automatisch ophalen
 
-Zet `CRON_SECRET` in je `.env` (minimaal 16 tekens) en roep het endpoint
-periodiek aan. Zonder dat geheim staat de automatische sync uit.
+**In productie doet de app dit zelf**, elk uur, zonder dat je een cron hoeft te
+regelen. Dat werkt omdat de app als één langlopend proces draait. Het interval
+pas je aan met `AUTO_SYNC_MINUTES` (minuten, minimaal 15); `0` zet het uit. In
+development staat het altijd uit, zodat je tijdens het bouwen niet ongevraagd de
+netwerken aanroept.
+
+Elke ronde kijkt **45 dagen terug**, niet alleen naar gisteren. Dat is bewust:
+netwerken keuren transacties nog weken later goed of af, en door terug te kijken
+volgt de app die statuswijzigingen. Verlopen sessies worden bij dezelfde ronde
+opgeruimd. Loopt een ronde langer dan het interval, dan wordt de volgende
+overgeslagen in plaats van er dwars door te lopen.
+
+### Liever een externe cron
+
+Draai je meerdere instanties, dan zou elke instantie tegelijk gaan ophalen. Zet
+`AUTO_SYNC_MINUTES=0`, zet `CRON_SECRET` (minimaal 16 tekens) en roep het
+endpoint zelf aan:
 
 ```bash
 # elk uur
 0 * * * * curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://jouw-app/api/cron/sync
 ```
 
-Elke sync kijkt standaard **45 dagen terug**, niet alleen naar gisteren. Dat is
-bewust: netwerken keuren transacties nog weken later goed of af, en door terug te
-kijken volgt de app die statuswijzigingen. Een langere periode kun je meegeven
-met `?lookbackDays=180` (maximaal 730). Verlopen sessies worden bij dezelfde run
-opgeruimd.
-
-Heb je geen server met crontab, dan werkt een gratis dienst als cron-job.org of
-een GitHub Action met een `schedule` net zo goed — het is één HTTP-aanroep.
+Zonder `CRON_SECRET` is dat endpoint uitgeschakeld. Een langere terugkijkperiode
+geef je mee met `?lookbackDays=180` (maximaal 730). Heb je geen crontab, dan werkt
+een dienst als cron-job.org of een GitHub Action met een `schedule` net zo goed —
+het is één HTTP-aanroep.
 
 ## Beveiliging
 
@@ -190,7 +200,38 @@ leesbare vorm over de lijn.
 De app draait als gewone Next.js-applicatie op Node, met SQLite als database.
 Dat is de route die werkt en die getest is.
 
-### Docker (aanbevolen)
+### Railway (aanbevolen)
+
+Railway bouwt de `Dockerfile` uit deze repo; `railway.json` zet de healthcheck en
+het herstartbeleid al goed. Wat je zelf doet:
+
+1. **Nieuw project → Deploy from GitHub repo**, kies deze repo en de branch.
+2. **Voeg een volume toe** en zet het mountpad op `/data`. Doe dit vóór de eerste
+   deploy. Zonder volume staat je database op de container zelf en ben je hem bij
+   de volgende deploy kwijt.
+3. **Zet de variabelen** onder Variables:
+
+   | Variabele | Waarde |
+   |---|---|
+   | `DATABASE_URL` | `file:/data/kasboek.db` |
+   | `ENCRYPTION_KEY` | `openssl rand -hex 32` |
+   | `SESSION_SECRET` | `openssl rand -hex 32` |
+   | `AUTO_SYNC_MINUTES` | `60` (of leeglaten; 60 is de standaard) |
+   | `APP_TIMEZONE` | `Europe/Amsterdam` |
+
+   `PORT` zet Railway zelf; die hoef je niet op te geven. Een `CRON_SECRET` heb je
+   niet nodig, want de app haalt zijn cijfers zelf op.
+4. **Genereer een domein** onder Settings → Networking. Railway regelt HTTPS.
+5. Open het domein en maak je account aan. Daarna is registreren dicht.
+
+Je hebt dus **geen tweede service voor een cron** nodig: de planner loopt in het
+app-proces mee. Laat `numReplicas` daarom op 1 staan — bij meerdere instanties
+zouden ze allemaal tegelijk gaan ophalen.
+
+Zet `ENCRYPTION_KEY` ook in je wachtwoordmanager. Raak je die kwijt, dan zijn de
+opgeslagen API-sleutels onleesbaar en moet je ze opnieuw invoeren.
+
+### Docker (eigen server of NAS)
 
 ```bash
 docker build -t kasboek .
@@ -199,7 +240,6 @@ docker run -d --name kasboek -p 3000:3000 \
   -e DATABASE_URL="file:/data/kasboek.db" \
   -e ENCRYPTION_KEY="…" \
   -e SESSION_SECRET="…" \
-  -e CRON_SECRET="…" \
   kasboek
 ```
 
@@ -322,9 +362,11 @@ lib/
   crypto.ts          AES-256-GCM en scrypt
   dates.ts           dagindeling met echte tijdzone-ondersteuning
   db.ts              kiest tussen lokaal SQLite en Cloudflare D1
+  scheduler.ts       de ingebouwde planner voor automatisch ophalen
   fx.ts              wisselkoersen van de ECB
   reporting.ts       de aggregatie waar het dashboard op leunt
   sync.ts            per account ophalen, normaliseren en opslaan
+instrumentation.ts   start de planner bij het opstarten van de server
 migrations/          SQL-migraties voor D1 (wrangler)
 prisma/schema.prisma datamodel
 scripts/             Prisma-client genereren per doelplatform
