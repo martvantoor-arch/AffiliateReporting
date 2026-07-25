@@ -1,0 +1,42 @@
+{
+  "name": "affiliate-reporting",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "tsx --test tests/*.test.ts",
+    "setup": "prisma generate && prisma db push",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "demo": "tsx prisma/demo.ts"
+  },
+  "overrides": {
+    "postcss": "^8.5.23",
+    "sharp": "^0.35.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "fast-xml-parser": "^5.10.1",
+    "next": "^16.2.11",
+    "qrcode": "^1.5.4",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^16.2.11",
+    "prisma": "^6.1.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

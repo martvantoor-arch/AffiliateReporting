@@ -1,0 +1,173 @@
+// Affiliate Reporting — datamodel
+//
+// Alles wat gevoelig is (API-sleutels, wachtwoorden, TOTP-secrets) wordt
+// versleuteld of gehasht opgeslagen. Zie lib/crypto.ts en lib/auth/password.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  // Versleuteld TOTP-secret (base32). Pas actief als totpEnabled true is.
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
+  // Versleutelde JSON-array met eenmalige herstelcodes (gehasht per code).
+  recoveryCodes String?
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  timezone     String    @default("Europe/Amsterdam")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions Session[]
+  accounts NetworkAccount[]
+  syncRuns SyncRun[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  // SHA-256 van het sessietoken; het token zelf staat alleen in de cookie.
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  userAgent  String?
+  ipHash     String?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model NetworkAccount {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // daisycon | tradetracker | tradedoubler | bol | awin
+  network String
+  label   String
+  enabled Boolean @default(true)
+
+  // AES-256-GCM versleutelde JSON met de API-credentials.
+  credentials String
+  // Niet-geheime instellingen (site-id's, endpoint-overrides) als platte JSON.
+  settings    String @default("{}")
+
+  lastSyncAt      DateTime?
+  lastSyncStatus  String?
+  lastSyncMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+  dailyStats   DailyStat[]
+  syncRuns     SyncRun[]
+
+  @@unique([userId, network, label])
+  @@index([userId])
+  @@map("network_accounts")
+}
+
+model Transaction {
+  id        String         @id @default(cuid())
+  accountId String
+  account   NetworkAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  network   String
+
+  // Id zoals het netwerk het aanlevert; gebruikt voor idempotente upserts.
+  externalId String
+
+  occurredAt DateTime
+  // YYYY-MM-DD in de tijdzone van de gebruiker, voorberekend voor snelle groepering.
+  day        String
+
+  // pending | approved | rejected
+  status String
+
+  currency     String
+  commission   Float
+  // Commissie omgerekend naar euro met de koers van lib/fx.ts.
+  commissionEur Float
+  saleAmount   Float  @default(0)
+  saleAmountEur Float @default(0)
+
+  programId   String?
+  programName String?
+  countryCode String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, externalId])
+  @@index([accountId, occurredAt])
+  @@index([day])
+  @@index([network, day])
+  @@map("transactions")
+}
+
+/// Voor netwerken die alleen geaggregeerde rapportages leveren (clicks,
+/// impressies), of als aanvulling op transactieregels.
+model DailyStat {
+  id        String         @id @default(cuid())
+  accountId String
+  account   NetworkAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  network   String
+
+  day         String
+  impressions Int   @default(0)
+  clicks      Int   @default(0)
+  sales       Int   @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, day])
+  @@index([day])
+  @@map("daily_stats")
+}
+
+model SyncRun {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId String?
+  account   NetworkAccount? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  network   String?
+
+  // running | ok | error | partial
+  status  String
+  // manual | cron | onboarding
+  trigger String @default("manual")
+
+  itemsUpserted Int    @default(0)
+  message       String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([userId, startedAt])
+  @@map("sync_runs")
+}
+
+/// EUR-basis wisselkoersen (1 EUR = rate CUR), gecached van de ECB.
+model FxRate {
+  currency  String   @id
+  rate      Float
+  fetchedAt DateTime @default(now())
+
+  @@map("fx_rates")
+}
