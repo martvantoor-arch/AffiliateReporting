@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import {
+  axisTickLabel,
   labelStep,
   linePath,
   nearestIndex,
@@ -25,6 +26,7 @@ interface TrendLinesProps {
   currentLabel: string;
   previousLabel: string;
   height?: number;
+  emptyMessage?: string;
 }
 
 const CURRENT_COLOR = "var(--series-1)";
@@ -39,6 +41,7 @@ export function TrendLines({
   currentLabel,
   previousLabel,
   height = 240,
+  emptyMessage = "Nog geen commissie om te vergelijken.",
 }: TrendLinesProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [active, setActive] = useState<number | null>(null);
@@ -86,6 +89,19 @@ export function TrendLines({
     }
     return -1;
   }, [data]);
+
+  // Twee platte lijnen op de nullijn zeggen minder dan één zin. Alle hooks
+  // staan hierboven, dus deze uitstap is veilig.
+  if (!data.some((point) => (point.current ?? 0) > 0 || (point.previous ?? 0) > 0)) {
+    return (
+      <p
+        className="flex items-center justify-center text-center text-sm text-muted"
+        style={{ minHeight: height }}
+      >
+        {emptyMessage}
+      </p>
+    );
+  }
 
   return (
     <div ref={ref} className="relative" style={{ minHeight: height }}>
@@ -137,7 +153,7 @@ export function TrendLines({
                 fontSize="10"
                 fill="var(--ink-muted)"
               >
-                {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+                {axisTickLabel(tick, scale)}
               </text>
             </g>
           ))}

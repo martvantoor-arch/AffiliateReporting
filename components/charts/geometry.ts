@@ -8,9 +8,13 @@ export interface Margins {
 }
 
 /** Een "mooie" bovengrens plus de bijbehorende rasterlijnen. */
-export function niceScale(max: number, tickCount = 4): { max: number; ticks: number[] } {
+export function niceScale(
+  max: number,
+  tickCount = 4,
+): { max: number; ticks: number[]; step: number } {
   if (!Number.isFinite(max) || max <= 0) {
-    return { max: 1, ticks: [0, 0.25, 0.5, 0.75, 1] };
+    // Hele getallen, anders levert afronden dubbele labels op (0 0 1 1 1).
+    return { max: 4, ticks: [0, 1, 2, 3, 4], step: 1 };
   }
   const rough = max / tickCount;
   const magnitude = 10 ** Math.floor(Math.log10(rough));
@@ -23,7 +27,26 @@ export function niceScale(max: number, tickCount = 4): { max: number; ticks: num
   for (let value = 0; value <= top + step / 2; value += step) {
     ticks.push(Math.round(value * 1e6) / 1e6);
   }
-  return { max: top, ticks };
+  return { max: top, ticks, step };
+}
+
+/**
+ * Label voor een rasterlijn. Het aantal decimalen volgt de stapgrootte: bij een
+ * as die tot een paar euro loopt is afronden op hele euro's niet genoeg — dan
+ * krijg je vier keer hetzelfde label onder elkaar.
+ */
+export function axisTickLabel(value: number, scale: { max: number; step: number }): string {
+  // Eén eenheid per as: gaat de as over duizend heen, dan staat élk label in k.
+  if (scale.max >= 1000) {
+    // Afronden op hele duizenden maakt van 1500 een "2k"; dat liegt.
+    const decimals = scale.step % 1000 === 0 ? 0 : 1;
+    return value === 0 ? "0" : `${decimal(value / 1000, decimals)}k`;
+  }
+  return decimal(value, scale.step >= 1 ? 0 : scale.step >= 0.1 ? 1 : 2);
+}
+
+function decimal(value: number, decimals: number): string {
+  return value.toFixed(decimals).replace(".", ",");
 }
 
 /**

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ChartTooltip } from "@/components/charts/tooltip";
 import { useWidth } from "@/components/charts/use-width";
 import {
+  axisTickLabel,
   indexFromX,
   labelStep,
   niceScale,
@@ -31,6 +32,7 @@ interface StackedBarsProps {
   points: StackedPoint[];
   series: StackedSeries[];
   height?: number;
+  emptyMessage?: string;
 }
 
 /** 2px tussenruimte in de kleur van het vlak, geen randje om de segmenten. */
@@ -38,7 +40,12 @@ const SEGMENT_GAP = 2;
 const CORNER_RADIUS = 4;
 const MAX_BAR_WIDTH = 26;
 
-export function StackedBars({ points, series, height = 260 }: StackedBarsProps) {
+export function StackedBars({
+  points,
+  series,
+  height = 260,
+  emptyMessage = "Nog geen commissie in deze periode.",
+}: StackedBarsProps) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [active, setActive] = useState<number | null>(null);
 
@@ -77,6 +84,19 @@ export function StackedBars({ points, series, height = 260 }: StackedBarsProps) 
     margins.top + plotHeight - (value / scale.max) * plotHeight;
 
   const activePoint = active !== null ? points[active] : null;
+
+  // Een as zonder staven is geen grafiek maar een raadsel: liever één zin.
+  // Alle hooks staan hierboven, dus deze uitstap is veilig.
+  if (!points.some((point) => point.total > 0)) {
+    return (
+      <p
+        className="flex items-center justify-center text-center text-sm text-muted"
+        style={{ minHeight: height }}
+      >
+        {emptyMessage}
+      </p>
+    );
+  }
 
   return (
     <div ref={ref} className="relative" style={{ minHeight: height }}>
@@ -129,7 +149,7 @@ export function StackedBars({ points, series, height = 260 }: StackedBarsProps) 
                 fontSize="10"
                 fill="var(--ink-muted)"
               >
-                {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+                {axisTickLabel(tick, scale)}
               </text>
             </g>
           ))}

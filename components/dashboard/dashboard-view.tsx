@@ -112,6 +112,12 @@ export function DashboardView({ data }: { data: DashboardData }) {
   const staleAccounts = accounts.filter(
     (account) => account.enabled && !account.lastSyncAt,
   );
+  // Opgehaald, niets gevonden. Zonder deze melding leest een dashboard vol
+  // nullen als een storing, terwijl er gewoon nog niets verdiend is.
+  const syncedWithoutData =
+    !data.hasAnyData &&
+    problemAccounts.length === 0 &&
+    accounts.some((account) => account.enabled && account.lastSyncAt);
 
   if (accounts.length === 0) {
     return <EmptyState />;
@@ -149,6 +155,15 @@ export function DashboardView({ data }: { data: DashboardData }) {
           </Notice>
         ) : null}
 
+        {syncedWithoutData ? (
+          <Notice tone="info">
+            Je netwerken zijn bijgewerkt, maar er staan nog geen transacties in
+            deze periode. Bij nieuwe accounts is dat normaal — zodra er een
+            verkoop binnenkomt, verschijnt die hier vanzelf. Kijk desnoods verder
+            terug met de periodekiezer hierboven.
+          </Notice>
+        ) : null}
+
         {/* 01 — de kop: één groot getal, geen grafiek die dat verhaal verdunt. */}
         <section className="pt-5" aria-labelledby="overzicht">
           <div className="flex flex-wrap items-end justify-between gap-4">
@@ -169,14 +184,17 @@ export function DashboardView({ data }: { data: DashboardData }) {
                 <span className="tnum">{formatRange(range)}</span>. Bedragen in
                 vreemde valuta zijn omgerekend naar euro.
               </p>
-              <div className="mt-2">
-                <DeltaSentence
-                  ratio={expectedDelta.ratio}
-                  direction={expectedDelta.direction}
-                  absolute={expectedDelta.absolute}
-                  previousLabel={formatRange(previous)}
-                />
-              </div>
+              {/* Twee nullen vergelijken meldt "geen verschil": waar, maar ruis. */}
+              {totals.expected > 0 || previousTotals.expected > 0 ? (
+                <div className="mt-2">
+                  <DeltaSentence
+                    ratio={expectedDelta.ratio}
+                    direction={expectedDelta.direction}
+                    absolute={expectedDelta.absolute}
+                    previousLabel={formatRange(previous)}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="rise" style={{ animationDelay: "80ms" }}>
@@ -530,18 +548,27 @@ function Notice({
   tone,
   children,
 }: {
-  tone: "critical" | "warning";
+  tone: "critical" | "warning" | "info";
   children: React.ReactNode;
 }) {
-  const color = tone === "critical" ? "var(--critical)" : "var(--warning)";
+  const color =
+    tone === "critical"
+      ? "var(--critical)"
+      : tone === "warning"
+        ? "var(--warning)"
+        : "var(--rule-strong)";
   return (
     <div
       className="rise mt-4 flex items-start gap-2.5 rounded-[3px] border p-3 text-sm"
       style={{ borderColor: color, backgroundColor: "var(--surface)" }}
       role="status"
     >
-      <span aria-hidden="true" className="mt-px font-semibold" style={{ color }}>
-        {tone === "critical" ? "✕" : "!"}
+      <span
+        aria-hidden="true"
+        className="mt-px font-semibold"
+        style={{ color: tone === "info" ? "var(--ink-muted)" : color }}
+      >
+        {tone === "critical" ? "✕" : tone === "info" ? "i" : "!"}
       </span>
       <p className="text-ink-2">{children}</p>
     </div>
