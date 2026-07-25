@@ -13,9 +13,14 @@ export function SyncButton({
   accountId,
   /** Eén luide knop per pagina; losse rijen krijgen de rustige variant. */
   variant = "accent",
+  /** Verder terugkijken dan de standaard 45 dagen. */
+  lookbackDays,
+  label,
 }: {
   accountId?: string;
   variant?: "accent" | "quiet";
+  lookbackDays?: number;
+  label?: string;
 }) {
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +31,7 @@ export function SyncButton({
       try {
         const formData = new FormData();
         if (accountId) formData.set("accountId", accountId);
+        if (lookbackDays) formData.set("lookbackDays", String(lookbackDays));
         await syncNowAction(formData);
       } catch {
         setError("Het ophalen is niet gelukt. Probeer het opnieuw.");
@@ -49,7 +55,7 @@ export function SyncButton({
         aria-busy={isPending}
       >
         <RefreshIcon spinning={isPending} />
-        {isPending ? "Bezig…" : quiet ? "Ophalen" : "Cijfers ophalen"}
+        {isPending ? "Bezig…" : (label ?? (quiet ? "Ophalen" : "Cijfers ophalen"))}
       </button>
       {error ? (
         <p className="mt-1.5 text-xs" style={{ color: "var(--critical)" }}>

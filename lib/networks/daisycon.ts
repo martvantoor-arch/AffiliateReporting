@@ -208,18 +208,24 @@ async function fetchDailyStats(
   ids: string[],
   warnings: string[],
 ): Promise<NormalisedDailyStat[]> {
+  // Uit tenzij aangezet: het statistiekenpad van Daisycon is niet publiek
+  // vastgelegd en gaf eerder een 404. Zonder dit werken je commissies gewoon.
+  if (ctx.settings.fetchStats !== "ja") return [];
+
+  const statsPath = ctx.settings.statsPath?.trim() || "statistics/date";
+
   const perDay = new Map<string, NormalisedDailyStat>();
   for (const publisherId of ids) {
     try {
-      // Zelfde datumeis als bij de transacties; zie startOfDayText.
+      // Statistieken gebruiken start/end, niet start_date/end_date zoals de
+      // transacties. Zie het veld statsPath als het pad bij jou anders is.
       const params = new URLSearchParams({
-        start_date: startOfDayText(ctx.range.from),
-        end_date: endOfDayText(ctx.range.to),
-        interval: "day",
+        start: startOfDayText(ctx.range.from),
+        end: endOfDayText(ctx.range.to),
         per_page: "1000",
       });
       const query = params.toString().replace(/\+/g, "%20");
-      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/statistics?${query}`;
+      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/${statsPath}?${query}`;
       const response = await request(url, { headers, label: "Daisycon statistieken" });
       const rows = safeJsonArray(await response.text());
       for (const row of rows) {
@@ -372,6 +378,29 @@ export const daisyconAdapter: NetworkAdapter = {
       ],
       help:
         "Daisycon wil weten op welke datum je filtert. Clickdatum zet een transactie op de dag dat de bezoeker klikte; dat past bij de grafieken. 'Laatst gewijzigd' is handig als je vooral latere goedkeuringen wilt oppikken.",
+    },
+    {
+      name: "fetchStats",
+      label: "Clicks en impressies ophalen",
+      type: "select",
+      secret: false,
+      required: false,
+      options: [
+        { value: "nee", label: "Nee (aanbevolen)" },
+        { value: "ja", label: "Ja, proberen" },
+      ],
+      help:
+        "Het statistiekenpad van Daisycon is niet publiek vastgelegd en gaf eerder een 404. Zonder dit werken je commissies en grafieken gewoon; alleen 'per click' en 'conversie' blijven leeg.",
+    },
+    {
+      name: "statsPath",
+      label: "Statistieken-pad",
+      type: "text",
+      secret: false,
+      required: false,
+      placeholder: "statistics/date",
+      help: "Het pad achter /publishers/{id}/. Aanpassen als je weet welk pad jouw account gebruikt.",
+      showWhen: { field: "fetchStats", value: "ja" },
     },
     {
       name: "baseUrl",

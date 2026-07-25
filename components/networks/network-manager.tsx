@@ -99,6 +99,14 @@ export function NetworkManager({
 
                     <div className="flex flex-wrap items-center gap-2">
                       <SyncButton accountId={account.id} variant="quiet" />
+                      {/* Om vast te stellen of er überhaupt omzet is: kijk een
+                          half jaar terug in plaats van de standaard 45 dagen. */}
+                      <SyncButton
+                        accountId={account.id}
+                        variant="quiet"
+                        lookbackDays={183}
+                        label="6 maanden"
+                      />
                       <button
                         type="button"
                         className="btn-quiet px-3 py-2 text-xs"

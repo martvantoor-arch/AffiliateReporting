@@ -119,9 +119,11 @@ Wat dat praktisch betekent:
   netwerken worden gewoon bijgewerkt en de foutmelding van het netwerk komt
   letterlijk in de app te staan.
 
-**Meerdere sites bij hetzelfde netwerk** koppel je als losse accounts: klik bij
-het netwerk op *Nog een* en geef het een eigen naam. Elk account krijgt dan zijn
-eigen sleutels, sync-status en foutmeldingen.
+**Meerdere sites bij hetzelfde netwerk.** Bij Awin, Daisycon en TradeTracker zet
+je meerdere id's in één veld, gescheiden door een komma — één sleutel werkt voor
+al je sites. De verbindingstest laat zien welke id's je account heeft, en
+waarschuwt als er sites zijn die je nog niet ophaalt. Wil je ze liever apart
+bijhouden (eigen naam, eigen sync-status), klik dan op *Nog een* bij dat netwerk.
 
 **Welke versie staat er live?** `GET /api/health` geeft naast de status ook de
 korte commit-hash van de draaiende versie. Handig om te zien of een herstelde
@@ -133,12 +135,19 @@ standaard: dan staat een transactie op de dag dat de bezoeker klikte, wat past
 bij de grafieken. Wil je vooral latere goedkeuringen oppikken, kies dan
 'laatst gewijzigd'.
 
-**Clicks en impressies bij Awin** staan standaard uit. Awin rapporteert die
-alleen als totaal over een periode, niet als reeks per dag, dus voor dagcijfers
-is één API-aanroep per dag nodig. Zet je het aan, dan haalt de app hoogstens de
-laatste 7 dagen op en heb je ook een regio nodig (bijvoorbeeld `NL`). Zonder dit
-werken je commissies en alle grafieken gewoon; alleen de tegels "per click" en
-"conversie" blijven leeg.
+**Clicks en impressies staan standaard uit** bij Awin en Daisycon, en **bol.com
+staat op CSV-import**. Dat is geen gemakzucht: bij Awin bestaat er geen
+dagreeks (zie hieronder), bij Daisycon is het statistiekenpad niet publiek
+vastgelegd en gaf het een 404, en bij bol.com geeft het rapport-pad met een
+geldig token HTTP 403. Liever geen rode fout bij elke sync dan de schijn dat er
+iets kapot is; je commissies en grafieken werken in alle drie de gevallen
+gewoon. Elk van de drie kun je aanzetten bij het account als je het juiste pad
+kent.
+
+*Waarom Awin geen dagreeks heeft:* zijn rapportages geven een totaal over een
+periode. Voor dagcijfers is dus één aanroep per dag nodig. Zet je het aan, dan
+haalt de app hoogstens de laatste 7 dagen op en heb je ook een regio nodig
+(bijvoorbeeld `NL`).
 
 **bol.com verdient een aparte waarschuwing.** Het partnerprogramma wijzigt zijn
 rapportage-endpoint met enige regelmaat en er is geen stabiele publieke

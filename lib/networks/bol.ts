@@ -88,6 +88,20 @@ async function loadRows(
 }
 
 async function fetchTransactions(ctx: AdapterContext): Promise<FetchResult> {
+  // Standaard staat de API-route uit. bol.com heeft geen stabiel gedocumenteerd
+  // rapportage-endpoint voor partners; met een geldig token gaf het pad HTTP
+  // 403 "Unauthorized request". Dan is een rode fout bij elke sync alleen ruis,
+  // terwijl de CSV-import wel werkt.
+  if (ctx.settings.useApi !== "ja") {
+    return {
+      transactions: [],
+      dailyStats: [],
+      warnings: [
+        "bol.com staat op CSV-import. Exporteer je transacties bij bol.com en upload ze onderaan deze pagina. Wil je toch de API proberen, zet dat dan aan bij dit account.",
+      ],
+    };
+  }
+
   const transactions: NormalisedTransaction[] = [];
   const warnings: string[] = [];
 
@@ -140,6 +154,15 @@ async function testConnection(
 ): Promise<TestResult> {
   // De tokenwissel is het deel dat we met zekerheid kunnen valideren.
   await accessToken(ctx.credentials, ctx.settings);
+
+  if (ctx.settings.useApi !== "ja") {
+    return {
+      ok: true,
+      message:
+        "Inloggen bij bol.com werkt. Dit account staat op CSV-import, dus er wordt niets via de API opgehaald — upload je export onderaan deze pagina.",
+    };
+  }
+
   try {
     const to = new Date();
     const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -188,12 +211,26 @@ export const bolAdapter: NetworkAdapter = {
       required: true,
     },
     {
+      name: "useApi",
+      label: "Hoe halen we bol.com op",
+      type: "select",
+      secret: false,
+      required: false,
+      options: [
+        { value: "nee", label: "CSV-import (aanbevolen)" },
+        { value: "ja", label: "Via de API proberen" },
+      ],
+      help:
+        "bol.com heeft geen stabiel gedocumenteerd rapportage-endpoint voor partners; met een geldig token gaf het pad HTTP 403. Daarom staat de API uit en gebruik je de CSV-import onderaan deze pagina. Weet je het juiste pad, zet de API dan aan en vul het hieronder in.",
+    },
+    {
       name: "siteId",
       label: "Site-id",
       type: "text",
       secret: false,
       required: false,
       help: "Optioneel, als je meerdere sites in je partneraccount hebt.",
+      showWhen: { field: "useApi", value: "ja" },
     },
     {
       name: "reportPath",
@@ -203,6 +240,7 @@ export const bolAdapter: NetworkAdapter = {
       required: false,
       placeholder: DEFAULT_PATH,
       help: "Het pad achter api.bol.com waar je transacties staan.",
+      showWhen: { field: "useApi", value: "ja" },
     },
     {
       name: "acceptHeader",
@@ -212,6 +250,7 @@ export const bolAdapter: NetworkAdapter = {
       required: false,
       placeholder: DEFAULT_ACCEPT,
       help: "bol.com versioneert via deze header, bijvoorbeeld application/vnd.partner.v1+json.",
+      showWhen: { field: "useApi", value: "ja" },
     },
     {
       name: "baseUrl",

@@ -53,35 +53,42 @@ function authHeaders(credentials: Record<string, string>): HeadersInit {
 }
 
 async function fetchTransactions(ctx: AdapterContext): Promise<FetchResult> {
-  const publisherId = ctx.settings.publisherId?.trim();
-  if (!publisherId) throw new AdapterError("Awin publisher-id ontbreekt.");
+  const publisherIds = parseIds(ctx.settings.publisherId);
+  if (publisherIds.length === 0) {
+    throw new AdapterError("Awin publisher-id ontbreekt.");
+  }
 
   const transactions: NormalisedTransaction[] = [];
   const warnings: string[] = [];
   const headers = authHeaders(ctx.credentials);
 
-  for (const chunk of chunkRange(ctx.range.from, ctx.range.to, MAX_DAYS_PER_CALL)) {
-    const params = new URLSearchParams({
-      startDate: toNaiveIso(chunk.from),
-      endDate: toNaiveIso(chunk.to),
-      timezone: awinTimezone(ctx.timezone),
-      dateType: "transaction",
-    });
-    const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/transactions/?${params}`;
-    const rows = await requestJson<AwinTransaction[]>(url, {
-      headers,
-      label: "Awin",
-    });
-    if (!Array.isArray(rows)) {
-      throw new AdapterError("Awin gaf een onverwacht antwoord op de transactie-aanvraag.");
-    }
-    for (const row of rows) {
-      const mapped = mapTransaction(row);
-      if (mapped) transactions.push(mapped);
+  // Eén token geeft toegang tot al je Awin-sites, dus meerdere id's mogen —
+  // gescheiden door een komma. Anders zou je per site een apart account met
+  // hetzelfde token moeten aanmaken.
+  for (const publisherId of publisherIds) {
+    for (const chunk of chunkRange(ctx.range.from, ctx.range.to, MAX_DAYS_PER_CALL)) {
+      const params = new URLSearchParams({
+        startDate: toNaiveIso(chunk.from),
+        endDate: toNaiveIso(chunk.to),
+        timezone: awinTimezone(ctx.timezone),
+        dateType: "transaction",
+      });
+      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/transactions/?${params}`;
+      const rows = await requestJson<AwinTransaction[]>(url, {
+        headers,
+        label: `Awin (publisher ${publisherId})`,
+      });
+      if (!Array.isArray(rows)) {
+        throw new AdapterError("Awin gaf een onverwacht antwoord op de transactie-aanvraag.");
+      }
+      for (const row of rows) {
+        const mapped = mapTransaction(row);
+        if (mapped) transactions.push(mapped);
+      }
     }
   }
 
-  const dailyStats = await fetchDailyStats(ctx, headers, warnings);
+  const dailyStats = await fetchDailyStats(ctx, headers, publisherIds, warnings);
   return { transactions, dailyStats, warnings };
 }
 
@@ -128,10 +135,10 @@ const CLICK_DAYS = 7;
 async function fetchDailyStats(
   ctx: AdapterContext,
   headers: HeadersInit,
+  publisherIds: string[],
   warnings: string[],
 ): Promise<NormalisedDailyStat[]> {
-  const publisherId = ctx.settings.publisherId?.trim();
-  if (!publisherId) return [];
+  if (publisherIds.length === 0) return [];
   if (ctx.settings.fetchClicks !== "ja") return [];
 
   // Awin eist een regio-lijst; zonder die parameter volgt HTTP 400
@@ -147,26 +154,29 @@ async function fetchDailyStats(
 
   try {
     for (const day of days) {
-      const params = new URLSearchParams({
-        startDate: day,
-        endDate: day,
-        region,
-        timezone: awinTimezone(ctx.timezone),
-        dateType: "transaction",
-      });
-      const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/reports/advertiser?${params}`;
-      const rows = await requestJson<Record<string, unknown>[]>(url, {
-        headers,
-        label: "Awin rapportage",
-      });
-      if (!Array.isArray(rows)) continue;
-
-      // Het rapport staat per adverteerder; wij tellen op naar één dagtotaal.
+      // Alle sites bij elkaar opgeteld tot één dagtotaal.
       const entry: NormalisedDailyStat = { day, impressions: 0, clicks: 0, sales: 0 };
-      for (const row of rows) {
-        entry.impressions += Math.round(parseAmount(pick(row, "impressions")));
-        entry.clicks += Math.round(parseAmount(pick(row, "clicks")));
-        entry.sales += Math.round(parseAmount(pick(row, "quantity", "sales", "transactionCount")));
+      for (const publisherId of publisherIds) {
+        const params = new URLSearchParams({
+          startDate: day,
+          endDate: day,
+          region,
+          timezone: awinTimezone(ctx.timezone),
+          dateType: "transaction",
+        });
+        const url = `${base(ctx.settings)}/publishers/${encodeURIComponent(publisherId)}/reports/advertiser?${params}`;
+        const rows = await requestJson<Record<string, unknown>[]>(url, {
+          headers,
+          label: "Awin rapportage",
+        });
+        if (!Array.isArray(rows)) continue;
+
+        // Het rapport staat per adverteerder; die tellen we op.
+        for (const row of rows) {
+          entry.impressions += Math.round(parseAmount(pick(row, "impressions")));
+          entry.clicks += Math.round(parseAmount(pick(row, "clicks")));
+          entry.sales += Math.round(parseAmount(pick(row, "quantity", "sales", "transactionCount")));
+        }
       }
       stats.push(entry);
     }
@@ -196,21 +206,32 @@ async function testConnection(
   for (const account of publishers.slice(0, 10)) {
     details[String(account.accountId)] = String(account.accountName ?? "");
   }
-  const configured = ctx.settings.publisherId?.trim();
-  if (configured && publishers.length > 0) {
-    const match = publishers.some((a) => String(a.accountId) === configured);
-    if (!match) {
+  const configured = parseIds(ctx.settings.publisherId);
+  if (configured.length > 0 && publishers.length > 0) {
+    const known = new Set(publishers.map((a) => String(a.accountId)));
+    const unknown = configured.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
       return {
         ok: false,
-        message: `Token werkt, maar publisher-id ${configured} zit niet in dit account. Beschikbare id's: ${Object.keys(details).join(", ")}.`,
+        message: `Token werkt, maar publisher-id ${unknown.join(" en ")} zit niet in dit account. Beschikbare id's: ${Object.keys(details).join(", ")}.`,
         details,
       };
     }
   }
+
+  // Wijs erop dat er sites zijn die je nog niet ophaalt; anders mis je geld
+  // zonder dat er een foutmelding staat.
+  const missing = publishers
+    .map((a) => String(a.accountId))
+    .filter((id) => configured.length > 0 && !configured.includes(id));
+
   return {
     ok: true,
     message: publishers.length
-      ? `Verbonden. ${publishers.length} publisher-account(s) gevonden.`
+      ? `Verbonden. ${publishers.length} publisher-account(s) gevonden.` +
+        (missing.length > 0
+          ? ` Je haalt nu alleen ${configured.join(", ")} op; ${missing.join(", ")} blijft buiten beeld. Zet alle id's met een komma ertussen bij Publisher-id om alles mee te nemen.`
+          : "")
       : "Token werkt.",
     details,
   };
@@ -224,6 +245,15 @@ function awinTimezone(timezone: string): string {
 function optionalString(value: unknown): string | null {
   const text = value === undefined || value === null ? "" : String(value).trim();
   return text ? text : null;
+}
+
+/** "2978343, 2997937" → ["2978343", "2997937"], zonder dubbelen. */
+function parseIds(raw: string | undefined): string[] {
+  const ids = (raw ?? "")
+    .split(/[,\s;]+/)
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return [...new Set(ids)];
 }
 
 export const awinAdapter: NetworkAdapter = {
@@ -240,8 +270,9 @@ export const awinAdapter: NetworkAdapter = {
       type: "text",
       secret: false,
       required: true,
-      placeholder: "123456",
-      help: "Het numerieke id van je Awin-publisheraccount.",
+      placeholder: "123456, 234567",
+      help:
+        "Het numerieke id van je Awin-publisheraccount. Heb je meerdere sites, zet ze dan allemaal met een komma ertussen — één token werkt voor al je sites. De verbindingstest laat zien welke id's er zijn.",
     },
     {
       name: "apiToken",
