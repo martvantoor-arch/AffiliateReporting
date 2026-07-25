@@ -8,13 +8,27 @@
  * bij een sync. Verwijder ze via de netwerkenpagina als je klaar bent.
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+
+// Next laadt .env zelf, maar dit script draait los via tsx. Prisma 7 doet het
+// (anders dan Prisma 6) ook niet meer voor ons.
+try {
+  process.loadEnvFile();
+} catch {
+  // Geen .env: dan moeten de variabelen al in de omgeving staan.
+}
 
 import { encryptJson } from "../lib/crypto";
 import { dayKey } from "../lib/dates";
+import { PrismaClient } from "../lib/generated/prisma/client";
 import { NETWORK_IDS } from "../lib/networks/types";
 
-const prisma = new PrismaClient();
+// Dit script draait alleen lokaal tegen het SQLite-bestand.
+const prisma = new PrismaClient({
+  adapter: new PrismaBetterSqlite3({
+    url: process.env.DATABASE_URL ?? "file:./prisma/kasboek.db",
+  }),
+});
 
 const PROGRAMS: Record<string, string[]> = {
   daisycon: ["Zalando", "Coolblue", "Wehkamp", "HelloFresh", "Bergfreunde"],

@@ -31,15 +31,15 @@ export async function getRates(): Promise<RateTable> {
 
   try {
     const fetched = await fetchEcbRates();
-    await prisma.$transaction(
-      fetched.map(([currency, rate]) =>
-        prisma.fxRate.upsert({
-          where: { currency },
-          create: { currency, rate, fetchedAt: new Date() },
-          update: { rate, fetchedAt: new Date() },
-        }),
-      ),
-    );
+    // Los per valuta: D1 kent geen transacties, en een half bijgewerkte
+    // koersentabel is onschadelijk — de volgende ophaalronde vult hem aan.
+    for (const [currency, rate] of fetched) {
+      await prisma.fxRate.upsert({
+        where: { currency },
+        create: { currency, rate, fetchedAt: new Date() },
+        update: { rate, fetchedAt: new Date() },
+      });
+    }
     const table = toTable(fetched);
     memo = { table, at: Date.now() };
     return table;

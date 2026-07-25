@@ -3,13 +3,23 @@
 // Alles wat gevoelig is (API-sleutels, wachtwoorden, TOTP-secrets) wordt
 // versleuteld of gehasht opgeslagen. Zie lib/crypto.ts en lib/auth/password.ts.
 
+// Prisma 7: de client wordt als TypeScript gegenereerd en praat via een
+// "driver adapter" met de database. Er is dus geen native engine meer die per
+// platform moet kloppen — precies wat nodig is voor Cloudflare Workers.
+//
+// Voor Workers moet de WASM-querycompiler als module geïmporteerd worden in
+// plaats van op runtime gecompileerd (dat verbiedt Cloudflare). Dat regelt
+// scripts/generate-prisma.mjs door `runtime = "workerd"` toe te voegen; hier
+// staat de standaard voor Node.
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
 }
 
+// In Prisma 7 staat de connectiegegevens niet meer hier maar in
+// prisma.config.ts (voor de CLI) en in de adapter (voor de app).
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 model User {

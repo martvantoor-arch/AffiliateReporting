@@ -15,7 +15,9 @@ import {
 const DEFAULT_BASE = "https://services.daisycon.com";
 const DEFAULT_TOKEN_URL = "https://login.daisycon.com/oauth/access-token";
 const PER_PAGE = 500;
-const MAX_PAGES = 100;
+// Bewust laag gehouden: op Cloudflare Workers is het aantal uitgaande
+// requests per aanroep begrensd (50 op het gratis plan).
+const MAX_PAGES = 20;
 const MAX_DAYS_PER_CALL = 92;
 
 function base(settings: Record<string, string>): string {

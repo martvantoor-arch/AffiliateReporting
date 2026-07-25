@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Deze naam moet gelijk zijn aan de naam van het Worker-project in
+  // Cloudflare. Klopt hij niet, dan verwijst de service-binding
+  // WORKER_SELF_REFERENCE naar een Worker die niet bestaat en faalt de deploy
+  // met "references Worker ... which was not found" (code 10143).
+  "name": "affiliatereporting",
+
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-07-25",
+  // node:crypto (scrypt, AES-256-GCM, HMAC) en Buffer komen hiervandaan.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Workers hebben geen blijvend bestandssysteem, dus SQLite-als-bestand kan
+  // hier niet. D1 is Cloudflares eigen SQLite; lib/db.ts pakt deze binding
+  // automatisch zodra de app op Workers draait.
+  //
+  // Eenmalig aanmaken:
+  //   npx wrangler d1 create kasboek
+  // Zet daarna het database_id uit de uitvoer hieronder.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kasboek",
+      "database_id": "PLAATS_HIER_JE_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

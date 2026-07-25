@@ -16,7 +16,8 @@ const DEFAULT_BASE = "https://reports.tradedoubler.com";
 const DEFAULT_PATH = "/pan/aOpenReport12d.json";
 const DEFAULT_REPORT = "aff_transaction_report_v_2";
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 50;
+// Zie daisycon.ts: begrensd vanwege de requestlimiet op Workers.
+const MAX_PAGES = 20;
 const MAX_DAYS_PER_CALL = 92;
 
 function reportUrl(

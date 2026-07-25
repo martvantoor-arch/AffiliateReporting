@@ -154,13 +154,8 @@ kijken volgt de app die statuswijzigingen. Een langere periode kun je meegeven
 met `?lookbackDays=180` (maximaal 730). Verlopen sessies worden bij dezelfde run
 opgeruimd.
 
-Op Vercel kan het ook met `vercel.json`:
-
-```json
-{ "crons": [{ "path": "/api/cron/sync", "schedule": "0 * * * *" }] }
-```
-
-Let op: op Vercel is de standaard SQLite-opslag niet blijvend. Zie hieronder.
+Heb je geen server met crontab, dan werkt een gratis dienst als cron-job.org of
+een GitHub Action met een `schedule` net zo goed — het is één HTTP-aanroep.
 
 ## Beveiliging
 
@@ -192,28 +187,92 @@ leesbare vorm over de lijn.
 
 ## Deployen
 
-De app is een gewone Next.js-applicatie met SQLite.
+De app draait als gewone Next.js-applicatie op Node, met SQLite als database.
+Dat is de route die werkt en die getest is.
+
+### Docker (aanbevolen)
+
+```bash
+docker build -t kasboek .
+docker run -d --name kasboek -p 3000:3000 \
+  -v kasboek-data:/data \
+  -e DATABASE_URL="file:/data/kasboek.db" \
+  -e ENCRYPTION_KEY="…" \
+  -e SESSION_SECRET="…" \
+  -e CRON_SECRET="…" \
+  kasboek
+```
+
+Het volume `/data` houdt de database vast; bij het opstarten zet de app het
+schema klaar. Zet er een reverse proxy met TLS voor (Caddy of Traefik regelt een
+certificaat automatisch).
+
+### Zonder Docker
 
 ```bash
 npm ci
-npm run setup     # prisma generate + db push
+npm run setup     # client genereren + tabellen aanmaken
 npm run build
 npm start
 ```
 
-**Waar staat de database?** Een relatief pad in `DATABASE_URL` rekent Prisma
-vanaf de map `prisma/`. De standaardwaarde `file:./kasboek.db` geeft dus
-`prisma/kasboek.db`. Zorg dat dat pad op opslag staat die bewaard blijft:
+**Waar staat de database?** `DATABASE_URL` wordt gerekend vanaf de map waar je
+de app start, niet vanaf `prisma/`. De standaardwaarde
+`file:./prisma/kasboek.db` geeft dus een bestand in de map `prisma/`. Zorg dat
+dat pad op opslag staat die bewaard blijft, en maak er back-ups van — samen met
+je `ENCRYPTION_KEY`, want zonder die sleutel is een back-up van de database maar
+de helft waard.
 
-- **Eigen server of VPS**: werkt zo, met een back-up van dat bestand.
-- **Docker**: mount een volume op de map met het `.db`-bestand.
-- **Vercel en vergelijkbare serverless platforms**: het bestandssysteem is daar
-  tijdelijk, dus SQLite raakt bij elke deploy kwijt. Wil je daar hosten, zet dan
-  `provider = "postgresql"` in `prisma/schema.prisma` en gebruik een gehoste
-  Postgres. Verder hoeft er niets te veranderen: alle queries lopen via Prisma.
+Wil je liever Postgres (bijvoorbeeld omdat je al een database hebt), dan is dat
+een kleine ingreep: zet `provider = "postgresql"` in `prisma/schema.prisma` en
+wissel in `lib/db.ts` en `prisma.config.ts` de SQLite-adapter om voor
+`@prisma/adapter-pg`. Alle queries lopen via Prisma, dus verder verandert er
+niets.
 
-Denk aan een back-up van `prisma/kasboek.db` én van je `ENCRYPTION_KEY`. Zonder
-die sleutel is een back-up van de database maar de helft waard.
+### Cloudflare Workers: werkt nu niet
+
+Er staat een `wrangler.jsonc` en een D1-koppeling in de repo, en die is af — maar
+**de app draait op dit moment niet op Cloudflare Workers.** Dat is geen kwestie
+van configuratie: het loopt vast op een openstaande bug in Prisma zelf.
+
+Wat er precies gebeurt:
+
+| Stap | Uitkomst |
+|---|---|
+| `npm run cf:build` | slaagt, bundel is 2,2 MB gzip (ruim onder de limiet) |
+| Alles behalve de database | werkt: scrypt, AES-256-GCM, TOTP en tijdzones zijn in workerd getest |
+| Eerste databasequery | `WebAssembly.Module(): Wasm code generation disallowed by embedder` |
+
+Prisma 7 compileert zijn WASM-querycompiler op runtime, en dat verbiedt
+Cloudflare. Prisma heeft daar een `runtime = "workerd"`-stand voor die de WASM als
+module importeert (`scripts/generate-prisma.mjs` zet die), maar die import
+overleeft de bundeling door Next en OpenNext niet. Zie
+[prisma/prisma#28657](https://github.com/prisma/prisma/issues/28657) en
+[opennextjs-cloudflare#471](https://github.com/opennextjs/opennextjs-cloudflare/issues/471).
+Prisma 6 helpt hier niet: dan valt de client terug op de native engine, die op
+Workers per definitie niet bestaat.
+
+Twee manieren vooruit, mocht je Cloudflare echt willen:
+
+1. **Wachten.** Zodra Prisma die bug oplost, is het waarschijnlijk genoeg om
+   Prisma bij te werken en `npm run cf:deploy` te draaien. De D1-plumbing (de
+   binding, `lib/db.ts`, de migraties in `migrations/`) ligt klaar.
+2. **Prisma laten vallen voor D1** en de queries als SQL tegen `env.DB` schrijven.
+   Dat werkt zeker, geeft een kleine bundel en snelle koude starts, maar het is
+   een herschrijving van de datalaag (ongeveer vijftien plekken).
+
+Los daarvan zijn er twee dingen om te weten over Workers en deze app: uitgaande
+requests zijn per aanroep begrensd (50 op het gratis plan), wat bij vijf
+netwerken met paginering krap kan worden — daarom staat de paginalimiet per
+netwerk op 20. En een Worker heeft geen ingebouwde planner voor deze app, dus het
+automatisch ophalen blijft een externe cron die `/api/cron/sync` aanroept.
+
+Als de D1-koppeling ooit gebruikt wordt: `npx wrangler d1 create kasboek`, het
+`database_id` in `wrangler.jsonc` zetten, `npm run d1:apply` voor de tabellen, en
+de geheimen als `npx wrangler secret put ENCRYPTION_KEY` (idem `SESSION_SECRET`
+en `CRON_SECRET`). Let op dat D1 geen transacties kent; de sync is daarom
+opgebouwd uit losse idempotente upserts, zodat een half afgemaakte ronde zichzelf
+herstelt.
 
 ## Een netwerk toevoegen
 
@@ -241,8 +300,13 @@ npm run dev        # ontwikkelserver
 npm test           # tests (datums/tijdzones, parsing, crypto, TOTP)
 npm run lint       # ESLint
 npm run build      # productiebuild, inclusief typecheck
+npm run generate   # Prisma-client opnieuw genereren na een schemawijziging
 npm run db:studio  # database bekijken
 ```
+
+Wijzig je `prisma/schema.prisma`, dan draai je `npm run setup` (genereren én de
+tabellen bijwerken). Voor D1 hoort daar ook een migratiebestand bij:
+`npm run d1:migration > migrations/0002_iets.sql`.
 
 ### Hoe het in elkaar zit
 
@@ -257,10 +321,13 @@ lib/
   networks/          één adapter per netwerk + gedeelde hulpmiddelen
   crypto.ts          AES-256-GCM en scrypt
   dates.ts           dagindeling met echte tijdzone-ondersteuning
+  db.ts              kiest tussen lokaal SQLite en Cloudflare D1
   fx.ts              wisselkoersen van de ECB
   reporting.ts       de aggregatie waar het dashboard op leunt
   sync.ts            per account ophalen, normaliseren en opslaan
+migrations/          SQL-migraties voor D1 (wrangler)
 prisma/schema.prisma datamodel
+scripts/             Prisma-client genereren per doelplatform
 tests/               unit tests voor de foutgevoelige pure logica
 ```
 
@@ -288,14 +355,29 @@ wegfiltert — wie geleerd heeft dat bol.com geel is, ziet dat geel blijven.
 kunt een specifieke weergave bewaren of delen. Alle grafieken kijken naar
 dezelfde selectie.
 
+**Prisma 7 met een driver adapter.** De gegenereerde client is TypeScript en de
+verbinding loopt via een adapter (`better-sqlite3` lokaal, D1 op Cloudflare). Dat
+betekent dat er geen native database-engine per platform hoeft te kloppen, en het
+is de reden dat één codebase op beide kan draaien — zie `lib/db.ts`.
+
 ### Bekende punten
 
 - De rate limiter zit in het geheugen van één proces. Draai je meerdere
   instanties, gebruik dan een gedeelde store (Redis). De accountvergrendeling in
   de database werkt wel over instanties heen.
-- `npm audit` meldt nog een paar adviezen in de ESLint-keten (via
-  `brace-expansion`/`minimatch`). Die tooling draait alleen lokaal bij het linten
-  en zit niet in de productiebundel; oplossen kan pas als ESLint zelf bijwerkt.
+- `npm audit` meldt adviezen in de ontwikkel- en bouwtooling: de ESLint-keten
+  (via `brace-expansion`/`minimatch`), de Prisma-CLI (`@prisma/dev`,
+  `find-my-way`, `valibot`) en `@opennextjs/cloudflare`. Alle drie staan in
+  `devDependencies`; niets ervan zit in het pad dat een request afhandelt. De
+  Prisma-CLI zit wel in het Docker-image, omdat de entrypoint `prisma db push`
+  draait bij het opstarten — dat is een bewuste keuze, geen ongeluk. Oplossen kan
+  pas als die pakketten zelf bijwerken.
 - De sync loopt de netwerken één voor één af. Met vijf netwerken duurt dat
   tientallen seconden; op een platform met een korte time-out op serverless
   functies kun je `?lookbackDays=` verlagen of per netwerk syncen.
+- Cloudflare Workers werkt nog niet, door een openstaande bug in Prisma. Zie
+  [Deployen](#deployen) voor wat er precies gebeurt en welke twee routes er zijn.
+- De `Dockerfile` is geschreven maar niet door mij gebouwd: in de omgeving waar
+  deze code is gemaakt was geen Docker-daemon beschikbaar. De losse stappen erin
+  (`npm ci`, `npm run build`, `prisma db push`, `next start`) zijn wel allemaal
+  getest.

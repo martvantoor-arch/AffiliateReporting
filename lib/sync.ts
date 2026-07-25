@@ -8,7 +8,6 @@ import type { FetchResult, NormalisedTransaction } from "@/lib/networks/types";
 
 /** Standaard terugkijkperiode: netwerken passen transacties nog weken aan. */
 export const DEFAULT_LOOKBACK_DAYS = 45;
-const UPSERT_BATCH = 50;
 
 export interface AccountSyncResult {
   accountId: string;
@@ -91,25 +90,15 @@ export async function syncUser(
       const upserted = await persist(account.id, account.network, fetched, user.timezone, rates);
       const message = summarise(fetched, upserted);
 
-      await prisma.$transaction([
-        prisma.syncRun.update({
-          where: { id: run.id },
-          data: {
-            status: fetched.warnings.length > 0 ? "partial" : "ok",
-            itemsUpserted: upserted,
-            message,
-            finishedAt: new Date(),
-          },
-        }),
-        prisma.networkAccount.update({
-          where: { id: account.id },
-          data: {
-            lastSyncAt: new Date(),
-            lastSyncStatus: fetched.warnings.length > 0 ? "partial" : "ok",
-            lastSyncMessage: message,
-          },
-        }),
-      ]);
+      const status = fetched.warnings.length > 0 ? "partial" : "ok";
+      await prisma.syncRun.update({
+        where: { id: run.id },
+        data: { status, itemsUpserted: upserted, message, finishedAt: new Date() },
+      });
+      await prisma.networkAccount.update({
+        where: { id: account.id },
+        data: { lastSyncAt: new Date(), lastSyncStatus: status, lastSyncMessage: message },
+      });
 
       results.push({
         accountId: account.id,
@@ -122,20 +111,18 @@ export async function syncUser(
       });
     } catch (error) {
       const message = errorMessage(error);
-      await prisma.$transaction([
-        prisma.syncRun.update({
-          where: { id: run.id },
-          data: { status: "error", message, finishedAt: new Date() },
-        }),
-        prisma.networkAccount.update({
-          where: { id: account.id },
-          data: {
-            lastSyncAt: new Date(),
-            lastSyncStatus: "error",
-            lastSyncMessage: message,
-          },
-        }),
-      ]);
+      await prisma.syncRun.update({
+        where: { id: run.id },
+        data: { status: "error", message, finishedAt: new Date() },
+      });
+      await prisma.networkAccount.update({
+        where: { id: account.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncStatus: "error",
+          lastSyncMessage: message,
+        },
+      });
 
       results.push({
         accountId: account.id,
@@ -165,37 +152,36 @@ async function persist(
 ): Promise<number> {
   let count = 0;
 
-  for (let i = 0; i < fetched.transactions.length; i += UPSERT_BATCH) {
-    const batch = fetched.transactions.slice(i, i + UPSERT_BATCH);
-    await prisma.$transaction(
-      batch.map((transaction) => {
-        const data = toRow(accountId, network, transaction, timezone, rates);
-        return prisma.transaction.upsert({
-          where: {
-            accountId_externalId: {
-              accountId,
-              externalId: transaction.externalId,
-            },
-          },
-          create: data,
-          // Status en bedragen veranderen bij het netwerk nog; die volgen we.
-          update: {
-            status: data.status,
-            commission: data.commission,
-            commissionEur: data.commissionEur,
-            saleAmount: data.saleAmount,
-            saleAmountEur: data.saleAmountEur,
-            currency: data.currency,
-            occurredAt: data.occurredAt,
-            day: data.day,
-            programId: data.programId,
-            programName: data.programName,
-            countryCode: data.countryCode,
-          },
-        });
-      }),
-    );
-    count += batch.length;
+  // Regel voor regel, niet in één transactie: Cloudflare D1 kent geen
+  // transacties, dus die zouden daar stil uiteenvallen in losse queries. Omdat
+  // het upserts zijn, is een half afgemaakte sync geen probleem — de volgende
+  // ronde werkt dezelfde regels gewoon opnieuw bij.
+  for (const transaction of fetched.transactions) {
+    const data = toRow(accountId, network, transaction, timezone, rates);
+    await prisma.transaction.upsert({
+      where: {
+        accountId_externalId: {
+          accountId,
+          externalId: transaction.externalId,
+        },
+      },
+      create: data,
+      // Status en bedragen veranderen bij het netwerk nog; die volgen we.
+      update: {
+        status: data.status,
+        commission: data.commission,
+        commissionEur: data.commissionEur,
+        saleAmount: data.saleAmount,
+        saleAmountEur: data.saleAmountEur,
+        currency: data.currency,
+        occurredAt: data.occurredAt,
+        day: data.day,
+        programId: data.programId,
+        programName: data.programName,
+        countryCode: data.countryCode,
+      },
+    });
+    count += 1;
   }
 
   for (const stat of fetched.dailyStats) {

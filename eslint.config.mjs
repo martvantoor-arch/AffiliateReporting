@@ -7,7 +7,18 @@ const eslintConfig = [
   ...coreWebVitals,
   ...typescript,
   {
-    ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts"],
+    ignores: [
+      "node_modules/**",
+      ".next/**",
+      "out/**",
+      "build/**",
+      "next-env.d.ts",
+      // Door prisma generate aangemaakt.
+      "lib/generated/**",
+      // Build-output van Next en Cloudflare; geen broncode.
+      ".open-next/**",
+      ".wrangler/**",
+    ],
   },
 ];
 
