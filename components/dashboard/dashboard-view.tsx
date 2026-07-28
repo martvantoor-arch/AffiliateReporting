@@ -7,6 +7,7 @@ import { BarRows, type BarRow } from "@/components/charts/bar-rows";
 import { ChartFrame, DataTable, type LegendEntry } from "@/components/charts/chart-frame";
 import { StackedBars } from "@/components/charts/stacked-bars";
 import { TrendLines } from "@/components/charts/trend-lines";
+import { AutoRefresh } from "@/components/dashboard/auto-refresh";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { SyncButton } from "@/components/dashboard/sync-button";
@@ -125,6 +126,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
   return (
     <>
+      <AutoRefresh />
       <FilterBar
         preset={data.preset}
         range={range}

@@ -12,6 +12,8 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "demo": "tsx prisma/demo.ts",
+    "vapid": "node scripts/vapid.mjs",
+    "icons": "node scripts/make-icons.mjs",
     "d1:migration": "prisma migrate diff --from-local-d1 --to-schema prisma/schema.prisma --script",
     "d1:apply:local": "wrangler d1 migrations apply kasboek --local",
     "d1:apply": "wrangler d1 migrations apply kasboek --remote",
@@ -34,6 +36,7 @@
     "qrcode": "^1.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "web-push": "^3.6.7",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -43,6 +46,7 @@
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "^16.2.11",
     "prisma": "^7.9.0",

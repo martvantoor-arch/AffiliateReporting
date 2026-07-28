@@ -5,6 +5,7 @@ import { getRates, round2, toEur } from "@/lib/fx";
 import { getAdapter } from "@/lib/networks";
 import { AdapterError, truncate } from "@/lib/networks/http";
 import type { FetchResult, NormalisedTransaction } from "@/lib/networks/types";
+import { notifyNewSales, type NewSale } from "@/lib/push/notify";
 
 /** Standaard terugkijkperiode: netwerken passen transacties nog weken aan. */
 export const DEFAULT_LOOKBACK_DAYS = 45;
@@ -116,6 +117,7 @@ export async function syncUser(
   const rates = await getRates();
 
   const results: AccountSyncResult[] = [];
+  const newSales: NewSale[] = [];
 
   for (const account of accounts) {
     const run = await prisma.syncRun.create({
@@ -140,8 +142,13 @@ export async function syncUser(
         timezone: user.timezone,
       });
 
-      const upserted = await persist(account.id, account.network, fetched, user.timezone, rates);
+      const persisted = await persist(account.id, account.network, fetched, user.timezone, rates);
+      const upserted = persisted.upserted;
       const message = summarise(fetched, upserted);
+
+      // Bij de allereerste ronde van een account is álles nieuw; daar wil je
+      // geen melding van. lastSyncAt komt uit de query van vóór deze sync.
+      if (account.lastSyncAt) newSales.push(...persisted.created);
 
       const status = fetched.warnings.length > 0 ? "partial" : "ok";
       await prisma.syncRun.update({
@@ -189,11 +196,47 @@ export async function syncUser(
     }
   }
 
+  // Eén melding voor de hele ronde, niet per netwerk. Een mislukte push mag
+  // een geslaagde sync nooit alsnog laten omvallen.
+  if (newSales.length > 0) {
+    try {
+      await notifyNewSales(userId, newSales);
+    } catch (error) {
+      console.error(
+        "[push] Melding versturen mislukt:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   return {
     results,
     upserted: results.reduce((sum, r) => sum + r.upserted, 0),
     failed: results.filter((r) => !r.ok).length,
   };
+}
+
+interface PersistResult {
+  upserted: number;
+  /** Regels die er nog niet waren — precies waarvoor je een melding wilt. */
+  created: NewSale[];
+}
+
+/**
+ * Welke van deze externalIds staan er al? Eén vraag vooraf is goedkoper dan per
+ * regel kijken, en een upsert vertelt zelf niet of hij invoegde of bijwerkte.
+ */
+async function existingIds(accountId: string, ids: string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  const BATCH = 400;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const rows = await prisma.transaction.findMany({
+      where: { accountId, externalId: { in: ids.slice(i, i + BATCH) } },
+      select: { externalId: true },
+    });
+    for (const row of rows) found.add(row.externalId);
+  }
+  return found;
 }
 
 async function persist(
@@ -202,8 +245,14 @@ async function persist(
   fetched: FetchResult,
   timezone: string,
   rates: Awaited<ReturnType<typeof getRates>>,
-): Promise<number> {
+): Promise<PersistResult> {
   let count = 0;
+  const created: NewSale[] = [];
+
+  const known = await existingIds(
+    accountId,
+    fetched.transactions.map((transaction) => transaction.externalId),
+  );
 
   // Regel voor regel, niet in één transactie: Cloudflare D1 kent geen
   // transacties, dus die zouden daar stil uiteenvallen in losse queries. Omdat
@@ -211,6 +260,14 @@ async function persist(
   // ronde werkt dezelfde regels gewoon opnieuw bij.
   for (const transaction of fetched.transactions) {
     const data = toRow(accountId, network, transaction, timezone, rates);
+    if (!known.has(transaction.externalId)) {
+      created.push({
+        network,
+        programName: data.programName,
+        commissionEur: data.commissionEur,
+        status: data.status,
+      });
+    }
     await prisma.transaction.upsert({
       where: {
         accountId_externalId: {
@@ -256,7 +313,7 @@ async function persist(
     });
   }
 
-  return count;
+  return { upserted: count, created };
 }
 
 function toRow(

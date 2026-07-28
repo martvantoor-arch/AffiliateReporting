@@ -41,8 +41,34 @@ model User {
   sessions Session[]
   accounts NetworkAccount[]
   syncRuns SyncRun[]
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
+}
+
+/// Eén geïnstalleerde webapp die pushberichten wil ontvangen. Op iOS bestaat
+/// dit alleen voor een app die op het beginscherm staat; per apparaat komt er
+/// een eigen endpoint bij.
+model PushSubscription {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// URL van de pushdienst (Apple, Google). Uniek per apparaat.
+  endpoint String @unique
+  /// Publieke sleutel en auth-secret van de browser, voor de versleuteling.
+  p256dh String
+  auth   String
+
+  /// Waar de gebruiker dit heeft aangezet, zodat je apparaten uit elkaar houdt.
+  label     String?
+  createdAt DateTime  @default(now())
+  lastOkAt  DateTime?
+  /// Opeenvolgende mislukkingen; bij een definitieve fout wordt de rij gewist.
+  failures  Int       @default(0)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model Session {

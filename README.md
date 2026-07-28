@@ -15,6 +15,7 @@ netwerken zelf en de ECB voor wisselkoersen.
 - [Snel starten](#snel-starten)
 - [Netwerken koppelen](#netwerken-koppelen)
 - [Automatisch ophalen](#automatisch-ophalen)
+- [Melding bij een nieuwe sale](#melding-bij-een-nieuwe-sale)
 - [Beveiliging](#beveiliging)
 - [Als je jezelf buitensluit](#als-je-jezelf-buitensluit)
 - [Deployen](#deployen)
@@ -41,6 +42,11 @@ clicks, omzet, opbrengst per click en conversie bij.
 De periode wordt automatisch per dag, week of maand gegroepeerd, afhankelijk van
 hoe lang hij is. Elke grafiek heeft een tabelweergave, tooltips die met de muis
 én met de pijltjestoetsen werken, en werkt in licht en donker.
+
+**Op je telefoon.** Zet je Kasboek op je beginscherm, dan draait hij als losse
+app en kun je een **melding krijgen zodra er een sale binnenkomt**. Het dashboard
+ververst zichzelf elk half uur en meteen als je terugkomt in de app. Zie
+[Melding bij een nieuwe sale](#melding-bij-een-nieuwe-sale).
 
 **Praktisch.** Meerdere valuta worden omgerekend naar euro met de dagkoersen van
 de ECB. Transacties worden idempotent bijgewerkt: een netwerk dat een transactie
@@ -186,11 +192,19 @@ op.
 
 ## Automatisch ophalen
 
-**In productie doet de app dit zelf**, elk uur, zonder dat je een cron hoeft te
-regelen. Dat werkt omdat de app als één langlopend proces draait. Het interval
+**In productie doet de app dit zelf**, elk half uur, zonder dat je een cron hoeft
+te regelen. Dat werkt omdat de app als één langlopend proces draait. Het interval
 pas je aan met `AUTO_SYNC_MINUTES` (minuten, minimaal 15); `0` zet het uit. In
 development staat het altijd uit, zodat je tijdens het bouwen niet ongevraagd de
 netwerken aanroept.
+
+Dit interval bepaalt ook **hoe snel je een melding krijgt** bij een nieuwe sale:
+de app merkt een sale pas op als hij hem ophaalt. Sneller dan een kwartier heeft
+geen zin, want de netwerken werken zelf niet vaker bij.
+
+Het dashboard **ververst zichzelf** elk half uur zolang het zichtbaar is, en
+meteen als je terugkomt in de app terwijl de cijfers ondertussen oud zijn
+geworden. Op de achtergrond gebeurt er niets — dat kost alleen accu.
 
 Elke ronde kijkt **45 dagen terug**, niet alleen naar gisteren. Dat is bewust:
 netwerken keuren transacties nog weken later goed of af, en door terug te kijken
@@ -213,6 +227,46 @@ Zonder `CRON_SECRET` is dat endpoint uitgeschakeld. Een langere terugkijkperiode
 geef je mee met `?lookbackDays=180` (maximaal 730). Heb je geen crontab, dan werkt
 een dienst als cron-job.org of een GitHub Action met een `schedule` net zo goed —
 het is één HTTP-aanroep.
+
+## Melding bij een nieuwe sale
+
+De app kan je telefoon of tablet laten trillen zodra er een sale binnenkomt. Dat
+loopt via Web Push, dus zonder tussenpartij en zonder app-store.
+
+**Op iPhone en iPad geldt één harde voorwaarde: Kasboek moet op je beginscherm
+staan.** In Safari zelf bestaat Web Push niet — Apple staat het alleen toe voor
+een geïnstalleerde webapp (iOS 16.4 en nieuwer). Open de app in Safari, tik op
+*Deel → Zet op beginscherm*, en open hem daarna vanaf dat icoon. Doe je het
+vanuit een gewoon Safari-tabblad, dan blijft de knop grijs met uitleg waarom.
+
+Instellen:
+
+1. Genereer een sleutelpaar met `npm run vapid`.
+2. Zet `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` in je
+   omgevingsvariabelen (bij Railway onder *Variables*) en start de app opnieuw.
+3. Ga in de app naar **Account → Meldingen** en tik op *Notificaties aanzetten*.
+   Doe dat **per apparaat** — een abonnement hoort bij één browser op één
+   toestel, dus je iPhone en je iPad staan los van elkaar.
+4. Tik op *Proefmelding sturen* om te zien dat het werkt zonder op een sale te
+   wachten.
+
+Zonder die sleutels werkt de app gewoon; er staat dan alleen uitleg in plaats
+van een knop. Vervang je de sleutels later, dan moet je op elk apparaat opnieuw
+toestemming geven — de oude abonnementen zijn dan waardeloos.
+
+**Wat je krijgt te zien.** Eén sale geeft het bedrag, het netwerk en de
+productnaam. Meerdere sales in dezelfde ronde worden één melding met het totaal;
+vanaf vier regels vat hij samen per netwerk in plaats van elke productnaam op te
+sommen. Alle meldingen delen één tag, dus een nieuwe vervangt de vorige op je
+scherm in plaats van een stapel op te bouwen. Afgekeurde transacties geven geen
+melding.
+
+**Bij het koppelen van een nieuw netwerk krijg je geen stortvloed.** De eerste
+ronde van een account haalt maanden aan historie op; die telt bewust niet als
+nieuws. Pas vanaf de tweede ronde krijg je meldingen.
+
+Apparaten die de app hebben verwijderd of toestemming hebben ingetrokken meldt de
+pushdienst met een 404 of 410; die rijen ruimt de app zelf op.
 
 ## Beveiliging
 

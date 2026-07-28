@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { prisma } from "@/lib/db";
-import { encryptionKey, isProduction, sessionSecret } from "@/lib/env";
+import { encryptionKey, isProduction, sessionSecret, vapidConfig } from "@/lib/env";
 
 /**
  * Controle bij het opstarten, met één doel: als er iets mis is met de
@@ -49,6 +49,15 @@ export async function runStartupCheck(): Promise<void> {
         "Op een platform als Railway wordt die map bij elke deploy vervangen, dus " +
         "je gegevens verdwijnen dan. Koppel een volume aan (bijvoorbeeld op /data) " +
         "en zet DATABASE_URL op file:/data/kasboek.db.",
+    );
+  }
+
+  if (vapidConfig()) {
+    console.log("[start] Pushnotificaties staan aan.");
+  } else {
+    console.log(
+      "[start] Pushnotificaties staan uit (VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY ontbreken). " +
+        "Genereer een sleutelpaar met: npm run vapid",
     );
   }
 

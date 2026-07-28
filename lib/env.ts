@@ -59,6 +59,29 @@ export function allowedSignupEmails(): string[] {
 
 export const isProduction = process.env.NODE_ENV === "production";
 
+export interface VapidConfig {
+  publicKey: string;
+  privateKey: string;
+  /** Contactadres; pushdiensten eisen een mailto: of https:. */
+  subject: string;
+}
+
+/**
+ * Sleutelpaar waarmee de app zich bij Apple en Google identificeert als
+ * afzender. Ontbreekt het, dan zijn notificaties gewoon uit — dat mag de rest
+ * van de app niet tegenhouden, dus dit werpt geen fout.
+ */
+export function vapidConfig(): VapidConfig | null {
+  const publicKey = process.env.VAPID_PUBLIC_KEY?.trim();
+  const privateKey = process.env.VAPID_PRIVATE_KEY?.trim();
+  if (!publicKey || !privateKey) return null;
+
+  const contact = process.env.VAPID_SUBJECT?.trim();
+  const subject =
+    contact && /^(mailto:|https:)/.test(contact) ? contact : "mailto:kasboek@localhost";
+  return { publicKey, privateKey, subject };
+}
+
 /** Standaard tijdzone voor dag-groepering van transacties. */
 export const defaultTimezone = process.env.APP_TIMEZONE?.trim() || "Europe/Amsterdam";
 
@@ -70,7 +93,7 @@ export const defaultTimezone = process.env.APP_TIMEZONE?.trim() || "Europe/Amste
 export function autoSyncMinutes(): number {
   if (!isProduction) return 0;
   const raw = process.env.AUTO_SYNC_MINUTES?.trim();
-  if (raw === undefined || raw === "") return 60;
+  if (raw === undefined || raw === "") return 30;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   // Onder een kwartier heeft geen zin: netwerken werken niet sneller bij.

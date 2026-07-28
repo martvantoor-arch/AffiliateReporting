@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { PasswordForm } from "@/components/account/password-form";
+import { PushToggle } from "@/components/account/push-toggle";
 import { TwoFactor } from "@/components/account/two-factor";
 import { AppShell } from "@/components/app-shell";
 import { SubmitButton } from "@/components/submit-button";
@@ -8,6 +9,7 @@ import { requireUser } from "@/lib/auth/guard";
 import { prisma } from "@/lib/db";
 import { formatRelative } from "@/lib/format";
 import { logoutOtherDevicesAction } from "@/lib/account/actions";
+import { pushEnabled } from "@/lib/push/send";
 
 export const metadata: Metadata = { title: "Account" };
 export const dynamic = "force-dynamic";
@@ -15,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage() {
   const user = await requireUser();
 
-  const [sessionCount, syncRuns, transactionCount] = await Promise.all([
+  const [sessionCount, syncRuns, transactionCount, pushDevices] = await Promise.all([
     prisma.session.count({ where: { userId: user.id, expiresAt: { gt: new Date() } } }),
     prisma.syncRun.findMany({
       where: { userId: user.id },
@@ -23,6 +25,11 @@ export default async function AccountPage() {
       take: 10,
     }),
     prisma.transaction.count({ where: { account: { userId: user.id } } }),
+    prisma.pushSubscription.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, label: true, createdAt: true, lastOkAt: true },
+    }),
   ]);
 
   return (
@@ -59,8 +66,34 @@ export default async function AccountPage() {
           <PasswordForm />
         </section>
 
+        <section className="card p-4 sm:p-5" aria-labelledby="meldingen">
+          <p className="eyebrow">03 — Meldingen</p>
+          <h2 id="meldingen" className="font-display mt-1 mb-4 text-xl text-ink">
+            Melding bij een nieuwe sale
+          </h2>
+          <PushToggle configured={pushEnabled()} />
+
+          {pushDevices.length > 0 ? (
+            <ul className="mt-4 divide-y divide-rule border-t border-rule">
+              {pushDevices.map((device) => (
+                <li
+                  key={device.id}
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-sm"
+                >
+                  <span className="text-ink">{device.label ?? "Onbekend apparaat"}</span>
+                  <span className="tnum text-xs text-muted">
+                    {device.lastOkAt
+                      ? `laatste melding ${formatRelative(device.lastOkAt.toISOString())}`
+                      : `aangezet ${formatRelative(device.createdAt.toISOString())}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
         <section className="card p-4 sm:p-5" aria-labelledby="sessies">
-          <p className="eyebrow">03 — Apparaten</p>
+          <p className="eyebrow">04 — Apparaten</p>
           <h2 id="sessies" className="font-display mt-1 text-xl text-ink">
             Actieve sessies
           </h2>
@@ -78,7 +111,7 @@ export default async function AccountPage() {
         </section>
 
         <section className="card p-4 sm:p-5" aria-labelledby="synclog">
-          <p className="eyebrow">04 — Logboek</p>
+          <p className="eyebrow">05 — Logboek</p>
           <h2 id="synclog" className="font-display mt-1 text-xl text-ink">
             Laatste ophaalacties
           </h2>
