@@ -35,6 +35,10 @@ fi
 echo "Kasboek: draait als uid $(id -u); schema controleren op ${DATABASE_URL}"
 # Geen --skip-generate: die optie bestaat niet in Prisma 7, en `db push`
 # genereert daar ook niets meer. De client zit al in het image.
-npx prisma db push
+#
+# Rechtstreeks aanroepen in plaats van via npx: npx wil naar de npm-cache van
+# root schrijven, en dat mag deze gebruiker niet — dat gaf een foutregel in de
+# logs terwijl er niets aan de hand was.
+./node_modules/.bin/prisma db push
 
 exec "$@"

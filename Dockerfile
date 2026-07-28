@@ -77,4 +77,8 @@ EXPOSE 3000
 
 # De entrypoint zet de rechten goed en de tabellen klaar.
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["npm", "run", "start"]
+# Next rechtstreeks, niet via `npm run start`. Anders is npm het hoofdproces en
+# krijgt npm het SIGTERM bij een herstart; die maakt daar een foutmelding met
+# exitcode van, en dat leest in de logs als een crash terwijl het een normale
+# afsluiting is. Zo komt het signaal meteen bij node terecht.
+CMD ["node_modules/.bin/next", "start"]
